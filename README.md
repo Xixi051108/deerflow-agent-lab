@@ -1852,6 +1852,8 @@ See [backend/docs/TUI.md](backend/docs/TUI.md) for the full guide.
 
 ## Documentation
 
+- [Agent and Testing Learning Guide (Chinese)](docs/learning/agent-testing-bootcamp/README.md) - Guided changes on the DeerFlow runtime, including optional read-only synthetic task diagnosis tools
+- [Research Scope Rules (Chinese)](docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md) - Offline scope validation and version-bound confirmation rules; chat, persistence, and research execution integration are still pending
 - [Contributing Guide](CONTRIBUTING.md) - Development environment setup and workflow
 - [Configuration Guide](backend/docs/CONFIGURATION.md) - Setup and configuration instructions
 - [Architecture Overview](backend/CLAUDE.md) - Technical architecture details

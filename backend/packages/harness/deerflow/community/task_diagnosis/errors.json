@@ -1,0 +1,4 @@
+{
+  "E_TIMEOUT": {"cause": "上游请求超时", "suggested_action": "检查上游可用性与超时配置"},
+  "E_PERMISSION": {"cause": "访问权限不足", "suggested_action": "检查任务身份与资源授权"}
+}

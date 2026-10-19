@@ -83,6 +83,25 @@ regression exercises the production extractor under a generous process deadline.
 
 ## Important Development Guidelines
 
+### Research scope module
+
+`deerflow.agents.research.scope` implements offline consumer-research scope validation,
+version-bound confirmation and admission rules. It is not yet connected to ThreadState,
+the clarification card or research tools. See `packages/harness/deerflow/agents/AGENTS.md`
+for the trusted-state boundary and the root guide
+`docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md` for usage and verification.
+
+### Synthetic business-task diagnosis learning tools
+
+`deerflow.community.task_diagnosis.tools` provides opt-in `query_task_status`
+and `lookup_error_code` tools through the ordinary `config.yaml` tool loader.
+They read only bundled synthetic JSON through `run_file_io`; they do not query
+Gateway runs or modify tasks. Keep `data_source: synthetic` in every result,
+and never describe `suggested_action` as an executed repair. Tests cover public
+tool inputs, group filtering, real lead-agent assembly with a model substitute,
+and the strict blocking-I/O path. The guided exercise is in
+`docs/learning/agent-testing-bootcamp/LESSON_01.md` at the repository root.
+
 ### Documentation Update Policy
 Every code change must keep docs accurate and current: update `README.md` for
 user-facing behavior and the relevant `AGENTS.md` for development changes.

@@ -739,6 +739,7 @@ tool_groups:
   - name: bash
   - name: browser
   - name: knowledge
+  # - name: task-diagnosis  # Optional synthetic business-task learning tools
 
 # ============================================================================
 # Tools Configuration
@@ -746,6 +747,16 @@ tool_groups:
 # Configure available tools for the agent to use
 
 tools:
+  # Synthetic business-task diagnosis (read-only; not DeerFlow run history).
+  # Enable both entries and the task-diagnosis group above. No extra API key.
+  # See docs/learning/agent-testing-bootcamp/LESSON_01.md.
+  # - name: query_task_status
+  #   group: task-diagnosis
+  #   use: deerflow.community.task_diagnosis.tools:query_task_status_tool
+  # - name: lookup_error_code
+  #   group: task-diagnosis
+  #   use: deerflow.community.task_diagnosis.tools:lookup_error_code_tool
+
   # Read explicitly referenced conversations (Gateway API only, opt-in).
   # Each run must submit conversation_references; see backend/docs/API.md.
   # - name: read_conversation

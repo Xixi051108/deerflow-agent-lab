@@ -1,0 +1,8 @@
+{
+  "T1001": {"status": "failed", "error_code": "E_TIMEOUT"},
+  "T1002": {"status": "failed", "error_code": "E_PERMISSION"},
+  "T1003": {"status": "succeeded", "error_code": null},
+  "T1004": {"status": "running", "error_code": null},
+  "T1005": {"status": "failed", "error_code": "E_UNKNOWN"},
+  "T1006": {"status": "failed", "error_code": null}
+}

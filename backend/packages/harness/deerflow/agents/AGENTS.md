@@ -1,5 +1,12 @@
 ### Agent System
 
+**Research scope rules** (`research/scope.py`):
+- Offline Pydantic models and immutable transitions; no Gateway, model client, tools, or I/O. `ResearchScope` accepts incomplete drafts; `assess_scope` reports missing/ambiguous information. `with_defaults(..., as_of_date=...)` labels absent market/currency/language/date defaults; explicit `None` stays unresolved.
+- `ResearchScopeSession` is trusted application state. `prepare_confirmation` binds a full snapshot to research/version/request ids; `respond_to_confirmation` accepts only explicit confirm/reject responses. `revise_scope` replaces the entire scope with an expected-version check and invalidates confirmations on normalized content changes. Use validated reconstruction, never `model_copy(update=...)` for state transitions.
+- `require_confirmed_scope` is a future execution-boundary guard, not yet wired to ThreadState, clarification replies, or the agent tool path. Never expose session/receipt construction as a model tool or trust client-supplied confirmation state. Whole-record JSON round trips test serialization, not checkpoint integration or authentication.
+- Declared runtime limits are not enforced here. Hard constraints/preferences remain separately represented text; unresolved semantic questions block confirmation. No category DSL, feasibility guarantee, numeric product defaults, or preconfirmation network exploration.
+- Tests: `tests/test_research_scope.py`, `tests/blocking_io/test_research_scope.py`; user guide and evidence: root `docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md` and `RESEARCH_SCOPE_TEST_REPORT.md`.
+
 **Lead Agent** (`packages/harness/deerflow/agents/lead_agent/agent.py`):
 - Entry point: `make_lead_agent(config: RunnableConfig)` registered in `langgraph.json`.
   Its signature and bare-graph return type are a published ABI: LangGraph Server calls it
