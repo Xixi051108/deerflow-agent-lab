@@ -287,6 +287,12 @@ def prepare_confirmation(session: ResearchScopeSession) -> ResearchScopeSession:
     return _replace_session(session, pending_confirmation=request)
 
 
+def invalidate_confirmation(session: ResearchScopeSession) -> ResearchScopeSession:
+    """Reopen review on a new user turn, even if normalized scope is unchanged."""
+    session = ResearchScopeSession.model_validate(session)
+    return _replace_session(session, pending_confirmation=None, confirmation=None)
+
+
 def respond_to_confirmation(session: ResearchScopeSession, response: ScopeConfirmationResponse | Mapping[str, object]) -> ResearchScopeSession:
     """The caller must map an authenticated, explicit user action to this response."""
     session = ResearchScopeSession.model_validate(session)

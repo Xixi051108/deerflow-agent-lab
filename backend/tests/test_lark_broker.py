@@ -13,9 +13,34 @@ from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
+from support.shell import require_posix_sh
 
 from deerflow.integrations import lark_broker
 from deerflow.integrations.lark_broker import BrokerConfig, run_lark_cli, serve
+
+
+@pytest.fixture(autouse=True)
+def _windows_python_stub(monkeypatch):
+    """Execute the Python CLI fixture with its interpreter on Windows."""
+    if os.name != "nt":
+        return
+    real_run = subprocess.run
+
+    def run(command, *args, **kwargs):
+        if isinstance(command, list) and command and Path(command[0]).name == "fake-lark-cli":
+            command = [sys.executable, *command]
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def _launcher_command(launcher: Path, *args: str) -> list[str]:
+    prefix = [require_posix_sh()] if os.name == "nt" else []
+    return [*prefix, str(launcher), *args]
+
+
+def _system_environment() -> dict[str, str]:
+    return {name: os.environ[name] for name in ("SYSTEMROOT", "WINDIR") if name in os.environ}
 
 
 def _fake_lark_cli(tmp_path: Path) -> str:
@@ -69,7 +94,7 @@ def test_run_lark_cli_forwards_argv_stdin_and_credential_env(tmp_path: Path) -> 
     # The broker, not the caller, owns the credential paths.
     assert payload["config_dir"] == "/broker/only/config"
     assert payload["data_dir"] == "/broker/only/data"
-    assert result.stderr == b"ERR:auth status --json\n"
+    assert result.stderr == f"ERR:auth status --json{os.linesep}".encode()
 
 
 def test_run_lark_cli_propagates_exit_code(tmp_path: Path) -> None:
@@ -240,10 +265,11 @@ def test_launcher_resolves_python_and_forwards(broker_server, tmp_path: Path) ->
     # A PATH that has the python from this test runner so the launcher resolves it.
     py_dir = str(Path(sys.executable).parent)
     completed = subprocess.run(
-        [str(launcher), "do", "--boom"],
+        _launcher_command(launcher, "do", "--boom"),
         input=b"",
         capture_output=True,
         env={
+            **_system_environment(),
             "PATH": py_dir + os.pathsep + "/usr/bin:/bin",
             lark_broker.LARK_BROKER_URL_ENV: f"http://{host}:{port}",
         },
@@ -262,11 +288,12 @@ def test_launcher_can_pin_interpreter_via_env(broker_server, tmp_path: Path) -> 
     launcher = dest / "bin" / "lark-cli"
 
     completed = subprocess.run(
-        [str(launcher), "ping"],
+        _launcher_command(launcher, "ping"),
         input=b"",
         capture_output=True,
         # Deliberately no python on PATH; the pin is the only way to resolve it.
         env={
+            **_system_environment(),
             "PATH": "/nonexistent",
             lark_broker.LARK_BROKER_PYTHON_ENV: sys.executable,
             lark_broker.LARK_BROKER_URL_ENV: f"http://{host}:{port}",
@@ -284,10 +311,10 @@ def test_launcher_fails_loudly_without_python(tmp_path: Path) -> None:
     launcher = dest / "bin" / "lark-cli"
 
     completed = subprocess.run(
-        [str(launcher), "auth", "status"],
+        _launcher_command(launcher, "auth", "status"),
         input=b"",
         capture_output=True,
-        env={"PATH": "/nonexistent"},
+        env={**_system_environment(), "PATH": "/nonexistent"},
         timeout=30,
     )
     assert completed.returncode == 127

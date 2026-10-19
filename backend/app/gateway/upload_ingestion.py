@@ -229,7 +229,7 @@ class ThreadUploadIngestionService:
         file_info: dict[str, Any] = {
             "filename": safe_filename,
             "size": file_size,
-            "path": str(self._uploads_dir / safe_filename),
+            "path": str(file_path),
             "virtual_path": virtual_path,
             "artifact_url": uploads.upload_artifact_url(self._thread_id, safe_filename),
         }

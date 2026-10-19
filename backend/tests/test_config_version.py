@@ -163,7 +163,7 @@ def test_version_26_config_upgrades_to_checkpoint_channel_mode(tmp_path, caplog)
     assert "outdated" in caplog.text
     assert "(version 26)" in caplog.text
 
-    env = {**os.environ, "DEER_FLOW_CONFIG_PATH": str(config_path)}
+    env = {**os.environ, "DEER_FLOW_CONFIG_PATH": str(config_path), "UV_NO_SYNC": "1"}
     result = subprocess.run(
         [SCRIPT_BASH, str(repo_root / "scripts" / "config-upgrade.sh")],
         env=env,

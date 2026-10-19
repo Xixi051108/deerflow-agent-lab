@@ -19,6 +19,14 @@ from pathlib import Path
 import pytest
 
 
+def require_make() -> str:
+    """Return GNU Make, or explicitly report that its dry-run checks cannot run."""
+    make = shutil.which("make")
+    if make is None:
+        pytest.skip("Make dry-run checks require GNU Make")
+    return make
+
+
 def _script_bash_candidates(git: str | None, program_files: str | None, path_bash: str | None) -> list[Path]:
     """Build the ordered bash candidate list for Windows hosts."""
     candidates: list[Path] = []

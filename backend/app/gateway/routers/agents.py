@@ -41,6 +41,7 @@ class AgentResponse(BaseModel):
     """Response model for a custom agent."""
 
     name: str = Field(..., description="Agent name (hyphen-case)")
+    research_enabled: bool = False
     display_name: AgentDisplayName | None = Field(default=None, description="Optional Unicode display name; name remains the stable identifier")
     description: str = Field(default="", description="Agent description")
     model: str | None = Field(default=None, description="Optional model override")
@@ -63,6 +64,7 @@ class AgentCreateRequest(BaseModel):
     """Request body for creating a custom agent."""
 
     name: str = Field(..., description="Agent name (must match ^[A-Za-z0-9-]+$, stored as lowercase)")
+    research_enabled: bool = Field(default=False, strict=True)
     display_name: AgentDisplayName | None = None
     description: str = Field(default="", description="Agent description")
     model: str | None = Field(default=None, description="Optional model override")
@@ -79,6 +81,7 @@ class AgentUpdateRequest(BaseModel):
     """Request body for updating a custom agent."""
 
     display_name: AgentDisplayName | None = Field(default=None, description="Updated display name; null clears it")
+    research_enabled: bool = Field(default=False, strict=True)
     description: str | None = Field(default=None, description="Updated description")
     model: str | None = Field(default=None, description="Updated model override")
     tool_groups: list[str] | None = Field(default=None, description="Updated tool group whitelist")
@@ -193,6 +196,7 @@ def _agent_config_to_response(agent_cfg: AgentConfig, include_soul: bool = False
 
     return AgentResponse(
         name=agent_cfg.name,
+        research_enabled=agent_cfg.research_enabled,
         display_name=agent_cfg.display_name,
         description=agent_cfg.description,
         model=agent_cfg.model,
@@ -332,7 +336,7 @@ async def create_agent_endpoint(request: AgentCreateRequest) -> AgentResponse:
 
     # Config document — only the fields the caller set, matching the historical
     # writer (an omitted field stays absent rather than being materialized).
-    config_data: dict = {"name": normalized_name}
+    config_data: dict = {"name": normalized_name, "research_enabled": request.research_enabled}
     if request.display_name:
         config_data["display_name"] = request.display_name
     if request.description:
@@ -422,7 +426,7 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
         # Use model_fields_set to distinguish "field omitted" from "explicitly set to null".
         # This is critical for skills where None means "inherit all" (not "don't change").
         fields_set = request.model_fields_set
-        config_changed = bool(fields_set & ({"display_name", "description", "tool_groups", "skills", "allowed_subagents"} | set(_MODEL_BEHAVIOR_FIELDS)))
+        config_changed = bool(fields_set & ({"display_name", "description", "tool_groups", "skills", "allowed_subagents", "research_enabled"} | set(_MODEL_BEHAVIOR_FIELDS)))
 
         updated: dict | None = None
         if config_changed:
@@ -432,6 +436,8 @@ async def update_agent(name: str, request: AgentUpdateRequest) -> AgentResponse:
             }
             if "display_name" in fields_set:
                 updated["display_name"] = request.display_name or None
+            if "research_enabled" in fields_set:
+                updated["research_enabled"] = request.research_enabled
 
             new_tool_groups = request.tool_groups if "tool_groups" in fields_set else agent_cfg.tool_groups
             if new_tool_groups is not None:

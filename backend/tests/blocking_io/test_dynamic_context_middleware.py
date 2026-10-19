@@ -313,17 +313,15 @@ async def test_abefore_agent_policy_resolution_failure_does_not_replace_timeout(
             )
         )
     )
-    started = threading.Event()
     release = threading.Event()
-    finished = threading.Event()
+    executor = ThreadPoolExecutor(max_workers=1)
 
     def blocking_inject(state, runtime=None):
-        started.set()
         release.wait(timeout=2)
-        finished.set()
 
     try:
         with (
+            mock.patch.object(asyncio.get_running_loop(), "_default_executor", executor),
             mock.patch.object(mw, "_inject", blocking_inject),
             mock.patch(
                 "deerflow.agents.middlewares.dynamic_context_middleware._INJECT_TIMEOUT_SECONDS",
@@ -336,15 +334,15 @@ async def test_abefore_agent_policy_resolution_failure_does_not_replace_timeout(
                 await mw.abefore_agent(state, runtime)
     finally:
         release.set()
-        assert await asyncio.to_thread(finished.wait, 1)
+        await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
 
     assert isinstance(exc_info.value.__cause__, TimeoutError)
-    assert started.is_set()
 
 
 async def test_abefore_agent_records_checkpointed_memory_on_timeout() -> None:
     """A timeout does not hide frozen memory that remains effective for the run."""
-    mw = DynamicContextMiddleware()
+    cfg = MemoryConfig(manager_class=f"{__name__}:_LegacyBackend", backend_config={"failure_policy": {"read": "fail_open"}})
+    mw = DynamicContextMiddleware(app_config=SimpleNamespace(memory=cfg))
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()

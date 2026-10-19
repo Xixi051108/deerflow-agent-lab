@@ -11,7 +11,7 @@ import stat
 from pathlib import Path
 from urllib.parse import quote
 
-from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
+from deerflow.config.paths import VIRTUAL_PATH_PREFIX, as_windows_extended_path, get_paths
 from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.utils.thread_id import validate_thread_id
 
@@ -133,7 +133,7 @@ def validate_path_traversal(path: Path, base: Path) -> None:
         PathTraversalError: If a path traversal is detected.
     """
     try:
-        path.resolve().relative_to(base.resolve())
+        as_windows_extended_path(path).resolve().relative_to(as_windows_extended_path(base).resolve())
     except ValueError:
         raise PathTraversalError("Path traversal detected") from None
 
@@ -142,6 +142,8 @@ def validate_upload_destination(base_dir: Path, filename: str) -> Path:
     """Validate an upload destination without mutating an existing file."""
     safe_name = normalize_filename(filename)
     dest = base_dir / safe_name
+    if os.name == "nt" and len(str(dest)) >= 260:
+        dest = as_windows_extended_path(dest)
 
     try:
         st = os.lstat(dest)

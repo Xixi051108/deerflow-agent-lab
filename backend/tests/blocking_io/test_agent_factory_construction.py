@@ -37,29 +37,23 @@ async def _assert_factory_runs_off_the_event_loop(invoke) -> None:
     def agent_factory(*, config):
         factory_thread_ids.append(threading.get_ident())
         factory_started.set()
-        release_factory.wait(timeout=1)
+        release_factory.wait(timeout=5)
         return _Agent()
-
-    def release_after_factory_starts() -> None:
-        factory_started.wait(timeout=1)
-        heartbeat_during_factory.wait(timeout=1)
-        release_factory.set()
 
     async def ticker() -> None:
         while not stop_heartbeat.is_set():
             if factory_started.is_set() and not release_factory.is_set():
                 heartbeat_during_factory.set()
+                release_factory.set()
             await asyncio.sleep(0.01)
 
-    releaser = threading.Thread(target=release_after_factory_starts, daemon=True)
-    releaser.start()
     ticker_task = asyncio.create_task(ticker())
     try:
         await invoke(agent_factory)
     finally:
+        release_factory.set()
         stop_heartbeat.set()
         await ticker_task
-        await asyncio.to_thread(releaser.join, 1)
 
     assert len(factory_thread_ids) == 1
     assert factory_thread_ids[0] != threading.get_ident()

@@ -86,10 +86,22 @@ regression exercises the production extractor under a generous process deadline.
 ### Research scope module
 
 `deerflow.agents.research.scope` implements offline consumer-research scope validation,
-version-bound confirmation and admission rules. It is not yet connected to ThreadState,
-the clarification card or research tools. See `packages/harness/deerflow/agents/AGENTS.md`
-for the trusted-state boundary and the root guide
-`docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md` for usage and verification.
+version-bound confirmation and admission rules. Custom agents opt in with
+`research_enabled: true`; `research/middleware.py` connects the original loop and
+Human Input Cards to server-owned `ThreadState.research` and checks every research
+tool boundary. Current-turn operations are produced by the run worker from normalized
+input, never history. Both external state writers reject the research channel.
+Historical resumes/state updates and branches reopen drafts without receipts.
+See `packages/harness/deerflow/agents/AGENTS.md` and root
+`docs/learning/agent-testing-bootcamp/RESEARCH_INTEGRATION.md` for usage, tests, and
+remaining budget/report/panel work. Runtime limits are still declarations only.
+
+Research data tools `record_research_data` / `read_research_data` share that gate
+and the original tool-policy chain. `research/data.py` validates the merged
+category-neutral result; `research/storage.py` stores immutable, hashed snapshots
+outside sandbox user-data, while checkpoint state holds only a bounded reference.
+Exact quote/relationship validation does not establish truth or current prices.
+See root `docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md` and its test report.
 
 ### Synthetic business-task diagnosis learning tools
 
@@ -286,6 +298,10 @@ PYTHONPATH=. uv run pytest tests/test_<feature>.py -v
 
 Keep live tests opt-in via `DEER_FLOW_RUN_LIVE_TESTS=1`; guard POSIX-only
 markers with `os.name` for Windows collection.
+
+Native Windows regression prerequisites and platform-specific test boundaries
+are documented in `tests/AGENTS.md`. Backend Ruff excludes generated `.deer-flow`
+runtime content; its `skills_view` copies are not backend source files.
 
 Jina logging tests use dummy keys (`tests/test_jina_client.py`).
 Jina/Browserless/InfoQuest resolve URLs without rebuilding HTML.

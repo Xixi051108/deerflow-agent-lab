@@ -1,5 +1,10 @@
 ### Gateway API (`app/gateway/`)
 
+Upload destinations exceeding Windows MAX_PATH use the extended filesystem
+namespace after filename validation. Keep no-overwrite publication and traversal
+checks intact; return the actual host file path in upload metadata while virtual
+paths and artifact URLs retain their original format.
+
 `conversation_access.py` binds an opt-in read-only tool to a run request's
 explicit `conversation_references` and effective `runs:read` permission. Never
 derive grants from message contents or checkpoints. The callback travels through

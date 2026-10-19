@@ -207,6 +207,7 @@ class AgentConfig(BaseModel):
     """Configuration for a custom agent."""
 
     name: str
+    research_enabled: bool = Field(default=False, strict=True)
     display_name: AgentDisplayName | None = None
     description: str = ""
     model: str | None = None

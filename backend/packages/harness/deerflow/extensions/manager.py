@@ -165,7 +165,7 @@ class ExtensionManager:
                 raise FileExistsError(f"extension source is already installed: {managed_source}")
             if replace and not managed_source.exists():
                 raise ValueError(f"extension source is not installed: {managed_source}; use install")
-            uv_source = str(managed_source.relative_to(self.backend_dir))
+            uv_source = managed_source.relative_to(self.backend_dir).as_posix()
         else:
             if source_argument.exists():
                 raise ValueError("local extension sources must be directories so they can be snapshotted for deployment")

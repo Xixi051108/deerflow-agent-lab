@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from support.shell import require_make
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
@@ -160,6 +161,7 @@ extensions = ["broken-extension @ {missing_extension.as_uri()}"]
     )
     environment = os.environ.copy()
     environment["UV_CACHE_DIR"] = str(tmp_path / "uv-cache")
+    environment.pop("UV_NO_SYNC", None)
     subprocess.run(["uv", "lock"], cwd=project, env=environment, check=True, capture_output=True)
     missing_extension.unlink()
 
@@ -212,7 +214,7 @@ def test_root_extension_shortcuts_reject_ambient_environment_arguments() -> None
     ):
         environment[variable] = "ambient-value"
         result = subprocess.run(
-            ["make", "--no-print-directory", "-n", target],
+            [require_make(), "--no-print-directory", "-n", target],
             cwd=REPO_ROOT,
             env=environment,
             capture_output=True,
@@ -242,7 +244,7 @@ def test_root_extension_shortcuts_keep_command_line_arguments_out_of_the_shell_r
     malicious_value = f'"; printf {marker}; #$(shell printf {marker})'
 
     result = subprocess.run(
-        ["make", "--no-print-directory", "-n", target, f"{variable}={malicious_value}"],
+        [require_make(), "--no-print-directory", "-n", target, f"{variable}={malicious_value}"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -276,7 +278,7 @@ def test_root_extension_shortcuts_keep_values_out_of_the_cmd_recipe_on_windows(
 
     result = subprocess.run(
         [
-            "make",
+            require_make(),
             "--no-print-directory",
             "-n",
             "OS=Windows_NT",

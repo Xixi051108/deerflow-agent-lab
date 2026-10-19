@@ -44,6 +44,12 @@ def test_create_and_get_round_trips_config_and_soul(store):
     assert store.get_soul("reviewer", user_id="u1") == "You review."
 
 
+def test_research_enabled_round_trips_in_existing_config_document(store):
+    store.create("researcher", {"name": "researcher", "research_enabled": True}, "Research", user_id="u1")
+    assert store.get("researcher", user_id="u1").research_enabled is True
+    assert store.list(user_id="u1")[0].research_enabled is True
+
+
 def test_display_name_is_config_data_not_storage_identity(store):
     store.create("reviewer", {"name": "reviewer", "display_name": "代码审查助手"}, "Soul", user_id="u1")
     assert store.get("reviewer", user_id="u1").display_name == "代码审查助手"

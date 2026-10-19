@@ -14,6 +14,7 @@ from deerflow.mcp.tools import get_mcp_tools
 @pytest.mark.asyncio
 @pytest.mark.parametrize("authenticated", [False, True])
 async def test_parallel_example_user_agent_reaches_tool_requests(tmp_path, monkeypatch, authenticated):
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     captured = []
 
     class Handler(BaseHTTPRequestHandler):

@@ -16,7 +16,7 @@ from app.gateway.authz import require_permission, try_acquire_sandbox_for_reques
 from app.gateway.deps import get_config
 from app.gateway.upload_ingestion import ThreadUploadIngestionService, UnsafeFilenameError, UnsafeUploadDestinationError
 from deerflow.config.app_config import AppConfig
-from deerflow.config.paths import get_paths
+from deerflow.config.paths import as_windows_extended_path, get_paths
 from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.sandbox.sandbox_provider import SandboxProvider, get_sandbox_provider
 from deerflow.uploads.manager import (
@@ -212,6 +212,8 @@ def _pure_destination(uploads_dir: os.PathLike[str] | str, display_filename: str
     """
     base = Path(uploads_dir)
     file_path = base / normalize_filename(display_filename)
+    if os.name == "nt" and len(str(file_path)) >= 260:
+        file_path = as_windows_extended_path(file_path)
     try:
         st = os.lstat(file_path)
     except FileNotFoundError:

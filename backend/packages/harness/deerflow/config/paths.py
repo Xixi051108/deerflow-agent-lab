@@ -19,6 +19,18 @@ _SAFE_USER_ID_DIGEST_HEX_LEN = 16
 logger = logging.getLogger(__name__)
 
 
+def as_windows_extended_path(path: Path) -> Path:
+    """Represent an absolute filesystem path without Windows MAX_PATH limits."""
+    if os.name != "nt":
+        return path
+    value = str(path.absolute())
+    if value.startswith("\\\\?\\"):
+        return path
+    if value.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + value[2:])
+    return Path("\\\\?\\" + value)
+
+
 def _default_local_base_dir() -> Path:
     """Return the caller project's writable DeerFlow state directory."""
     return runtime_home()
@@ -360,7 +372,10 @@ class Paths:
 
     def user_projects_dir(self, user_id: str) -> Path:
         """Host path root for one user's project shelves: ``users/{user_id}/projects/``."""
-        return self.user_dir(user_id) / "projects"
+        # Shelf hashes plus a valid 255-byte filename can exceed MAX_PATH.
+        # Keep SQLite URLs on the ordinary base path; only shelf filesystem
+        # paths use the extended namespace. base_dir is already absolute.
+        return as_windows_extended_path(self.user_dir(user_id) / "projects")
 
     def user_project_dir(self, user_id: str, project_id: str) -> Path:
         """Host path for one project: ``users/{user_id}/projects/{project_id}/``."""

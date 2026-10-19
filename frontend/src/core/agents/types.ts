@@ -6,6 +6,7 @@ export interface AgentModelSettings {
 export type ReasoningEffort = "low" | "medium" | "high";
 
 export interface Agent {
+  research_enabled?: boolean;
   name: string;
   display_name?: string | null;
   description: string;
@@ -20,6 +21,7 @@ export interface Agent {
 }
 
 export interface CreateAgentRequest {
+  research_enabled?: boolean;
   name: string;
   display_name?: string | null;
   description?: string;
@@ -34,6 +36,7 @@ export interface CreateAgentRequest {
 }
 
 export interface UpdateAgentRequest {
+  research_enabled?: boolean;
   display_name?: string | null;
   description?: string | null;
   model?: string | null;

@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -117,8 +118,12 @@ async def test_runtime_config_store_file_is_owner_only(tmp_path) -> None:
         {"enabled": True, "bot_token": "xoxb-ui", "app_token": "xapp-ui"},
     )
 
-    mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
-    assert mode == 0o600
+    # Windows chmod only controls read-only status; mode bits cannot prove its ACL.
+    if os.name != "nt":
+        mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
+        assert mode == 0o600
+    restored = await asyncio.to_thread(ChannelRuntimeConfigStore, path)
+    assert restored.get_provider_config("slack") == {"enabled": True, "bot_token": "xoxb-ui", "app_token": "xapp-ui"}
 
 
 async def test_runtime_config_store_overwrites_loose_existing_file(tmp_path) -> None:
@@ -140,8 +145,11 @@ async def test_runtime_config_store_overwrites_loose_existing_file(tmp_path) -> 
         {"enabled": True, "bot_token": "xoxb-ui"},
     )
 
-    mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
-    assert mode == 0o600
+    if os.name != "nt":
+        mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
+        assert mode == 0o600
+    restored = await asyncio.to_thread(ChannelRuntimeConfigStore, path)
+    assert restored.get_provider_config("slack") == {"enabled": True, "bot_token": "xoxb-ui"}
 
 
 async def test_runtime_config_store_chmod_failure_is_logged_not_fatal(tmp_path, caplog) -> None:
@@ -149,8 +157,9 @@ async def test_runtime_config_store_chmod_failure_is_logged_not_fatal(tmp_path, 
 
     This is the line the previous owner-only assertion could not protect: with the
     pre-rename chmod patched to raise, the save must still persist the secret and
-    the destination must still end up owner-only (via the temp file's mkstemp mode
-    that ``Path.replace`` preserves). If the chmod call were dropped, the expected
+    on POSIX the destination must still end up owner-only (via the temp file's
+    mkstemp mode that ``Path.replace`` preserves). Windows ACLs are not tested by
+    POSIX mode bits. If the chmod call were dropped, the expected
     debug record would be absent and this test would fail.
     """
     path = tmp_path / "channels" / "runtime-config.json"
@@ -170,6 +179,7 @@ async def test_runtime_config_store_chmod_failure_is_logged_not_fatal(tmp_path, 
     await asyncio.to_thread(_save_with_failing_temp_chmod)
 
     assert any("Unable to chmod temporary channel runtime config store" in record.getMessage() for record in caplog.records)
-    mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
-    assert mode == 0o600
+    if os.name != "nt":
+        mode = await asyncio.to_thread(lambda: path.stat().st_mode & 0o777)
+        assert mode == 0o600
     assert await asyncio.to_thread(store.get_provider_config, "slack") == {"enabled": True, "bot_token": "xoxb-ui"}

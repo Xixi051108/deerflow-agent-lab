@@ -769,7 +769,11 @@ export function hasPresentFiles(message: Message) {
 }
 
 export function isClarificationToolMessage(message: Message) {
-  return message.type === "tool" && message.name === "ask_clarification";
+  return (
+    message.type === "tool" &&
+    (message.name === "ask_clarification" ||
+      message.name === "propose_research_scope")
+  );
 }
 
 export function extractPresentFilesFromMessage(message: Message) {

@@ -1070,6 +1070,11 @@ async def _branch_thread_with_reservation(
         for key, value in dict(source_snapshot.values).items():
             if key in _BRANCH_EXCLUDED_CHANNELS:
                 continue
+            if key == "research" and value is not None:
+                from deerflow.agents.research.runtime import reopen_research_for_replay
+
+                values[key] = {**reopen_research_for_replay(value), "thread_id": new_thread_id}
+                continue
             if key in branch_reducer_fields:
                 values[key] = Overwrite(list(value) if key == "messages" and isinstance(value, list) else value)
             else:
@@ -1547,6 +1552,15 @@ async def update_thread_state(thread_id: ThreadId, body: ThreadStateUpdateReques
     try:
         async with reserve_checkpoint_write(request, thread_id, user_id=get_effective_user_id()):
             source_metadata = await accessor.aget_metadata(read_config)
+            if body.checkpoint_id is not None:
+                from deerflow.agents.research.runtime import reopen_research_for_replay
+
+                head_config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                head = await accessor.aget(head_config)
+                selected = await accessor.aget(read_config)
+                research = selected.values.get("research") or head.values.get("research")
+                if research is not None:
+                    updates["research"] = reopen_research_for_replay(research)
             update_config = {
                 **read_config,
                 "configurable": dict(read_config.get("configurable", {})),

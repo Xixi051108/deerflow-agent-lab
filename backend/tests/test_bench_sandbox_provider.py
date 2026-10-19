@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 def _load_module(name: str, relative: str):
@@ -294,15 +296,18 @@ def test_boxlite_shim_workaround_retries_after_fixing_permissions(monkeypatch, t
 
     monkeypatch.setattr(bench, "_boxlite_version", lambda: "0.9.7")
 
-    result = bench._create_box_with_097_shim_workaround(
-        _create_box,
-        "sandbox-id",
-        boxes_dir=str(boxes_dir),
-    )
+    with mock.patch.object(Path, "chmod", autospec=True, side_effect=Path.chmod) as chmod:
+        result = bench._create_box_with_097_shim_workaround(
+            _create_box,
+            "sandbox-id",
+            boxes_dir=str(boxes_dir),
+        )
 
     assert result == "ok"
     assert calls == 2
-    assert shim.stat().st_mode & 0o111
+    assert any(call.args[0] == shim and call.args[1] & 0o111 == 0o111 for call in chmod.call_args_list)
+    if os.name != "nt":
+        assert shim.stat().st_mode & 0o111
 
 
 def test_boxlite_shim_workaround_loud_fails_for_other_versions(monkeypatch, tmp_path):

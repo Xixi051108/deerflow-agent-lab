@@ -6,7 +6,7 @@
 
 用户准备 Agent 应用开发实习、测试开发实习，两条路线同等准备，每天约 8 小时，计划 11 月 1 日开始投递。希望通过真实项目学会开发、自动化测试和排错。
 
-**当前主线已升级：在 DeerFlow 原有链路上开发开放品类的市场与竞品研究 Agent，一期优先消费者选购。** 用户明确希望高质量的完整业务流程，不满足于添加小功能。允许输入“手机”“电脑”等方向，由 Agent 发现产品、规划比较维度、收集证据、分析并交付报告；不把品类或名单写死。范围独立规则已实现，后续链路与完整业务流程尚待开发。
+**当前主线已升级：在 DeerFlow 原有链路上开发开放品类的市场与竞品研究 Agent，一期优先消费者选购。** 用户明确希望高质量的完整业务流程，不满足于添加小功能。允许输入“手机”“电脑”等方向，由 Agent 发现产品、规划比较维度、收集证据、分析并交付报告；不把品类或名单写死。板块 1–3 的范围、原 Agent 接线与研究数据契约已实现，候选发现、真实采集核实、预算收束、交付与研究面板尚待开发。
 
 原版链路学习已完成若干实际观察，两个合成业务任务诊断工具已启用并做了真实模型验证，属于入门练习。暂停 T1007 取消状态与按状态查询工具的练习，不沿旧路线自动继续开发。不要另建独立 FastAPI/Agent 应用。
 
@@ -14,7 +14,37 @@
 
 用户核心原则：**发现问题 → 复现问题 → 定位原因 → 最小修复 → 自动化回归。**
 
-### 最新停点：板块 1 独立规则已实现，下一步接线板块 2
+### 最新停点：板块 3 数据与证据契约已实现，下一步板块 4 候选发现与比较维度规划
+
+本轮按用户确认的整块计划实施，不再规划旧五阶段草案的“自动研究与交付”。新增 `research/data.py` 的开放品类产品／配置／维度／来源／事实／评价／推断／引用／缺口／冲突契约，以及 `research/storage.py` 的不可变 UTF-8 JSON 快照和分页读取。`record_research_data` / `read_research_data` 通过同一 `RESEARCH_TOOLS` 在 Gateway 原工厂及内嵌客户端注册，沿用范围准入和工具权限链。实际使用与限制见 `docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md`，完整证据见 `RESEARCH_DATA_TEST_REPORT.md`。
+
+`ThreadState.research.result` 只存归属／范围／数据版本、哈希、计数和最多三个产品预览；完整结果在当前用户线程根的 research 子目录，位于沙箱 user-data 外。限制为快照 2 MiB、索引 16 KiB、引用 4,000 字符、读取 16 KiB。整批校验成功并落盘后才返回 checkpoint 更新。文件成功但 checkpoint 未提交或异步调用被取消时，只留下未引用文件，不自动提升。
+
+新普通文字仍使确认失效；范围不变保留结果，重新确认后可读写。范围实质变化、新研究、历史恢复和分支清空当前结果索引。旧 checkpoint 无结果字段正常加载。结构与摘录检查不等于语义核实；本块不提供 verified 标记、不证明当前价格、预算停止或完整研究交付。
+
+原实现验收定向组合 **210 passed**，包含原范围／接线回归及本块 **66 个新用例**；真实 SQLite saver 关闭重开、原工厂／worker／HTTP/SSE／历史与分支均覆盖 full／delta。内嵌客户端验证工具注册和确认门槛，其字符串 API 仍不新增结构化确认入口。真实 Windows junction 重定向和来源标签进入模型请求的问题已先复现再修复；取消文件线程通过事件同步验证。开发后严格 I/O **146 passed / 1 skipped**（27.34 秒），全局 Ruff check／format 通过（1529 文件）。开发后默认离线两分片分别 **8526 passed / 193 skipped**（664.99 秒）和 **8545 passed / 176 skipped**（665.88 秒），均退出 0；共选中 **17,428 项：17,071 passed / 357 skipped / 0 failed**，每个进程另含相同的 6 项收集阶段跳过，不重复累计。原实现最终 diff 空白检查和 84 个本地文档链接检查通过。
+
+2026-10-19 按用户要求完成两项覆盖细节补测：失败来源有原因且正文仍匹配摘录时，关联校验仍拒绝（unsupported_quote／citations）；当前卡有效确认后只改研究 ID，同步／异步 × full／delta 均拒绝（version_conflict），无快照或结果写入。新增 **5 项**，本块当前 **71 项**；最新完整定向 **215 passed**（27.83 秒），严格 I/O 全量 **146 passed / 1 skipped**（24.07 秒），全局 Ruff check／format 通过（1529 文件）。旧 ID 负例强化后实际出现红灯：测试替身未独立替换范围占位符，提前报 invalid_data；仅修正测试替身，未改生产代码。新增独立负例首跑即通过。日志为同目录 coverage-*.log，详见板块三报告 D28／G20 及红绿表。**本次补测未重跑默认离线全集**，上述 17,071 passed 属于原实现历史结果，不包含新增 5 项。
+
+开发前默认离线基线再次得到 **17,006 passed / 357 个选中用例 skipped / 0 failed**；两分片汇总分别 8504 passed / 183 skipped、8502 passed / 186 skipped，每次另包含相同的 6 个收集阶段跳过。沙箱内最小 asyncio 卡在 socketpair，相关进程已核对并停止，验证改在宿主执行，保持防护开启和禁写字节码。两个分片不能同时收集：已有技能测试使用固定 CaseProbe 临时文件，首次收集竞争失败，错开后重跑通过。日志：`.deer-flow/local-dev/research-data-verification/`。
+
+板块三开发起点为 main、HEAD `609e88c`；开发及补测期间保留原有未提交改动和 `.extensions_config.json.lock`，未新建本机真实研究 Agent、未运行真实模型研究、未改密钥或实际配置、未启动 Docker、未提交推送、未使用子 Agent。补测完成后用户明确授权将全部应版本管理的文件提交并推送至已配置仓库；排除本地配置、运行数据及锁文件，远程实际状态以 Git 核实结果为准。后续从板块 4 的受控候选发现／筛选理由／动态维度写入开始，复用本块数据工具；价格核实、预算和报告仍属于板块 5–7。
+
+### 板块 2 接线及全量回归修复历史
+
+板块二按计划完成实现。已选定专用自定义 Agent 入口、每次明确填写运行限制、确认后所有新普通文字（包括“继续”）先重新确认。不要重复询问这些选择。
+
+新增 `AgentConfig.research_enabled`、原 Agent／内嵌客户端的研究中间件与 `propose_research_scope`；`ThreadState.research` 保存用户／Thread／Agent 绑定、范围会话与最后处理 Run。当前卡的明确选项通过验证后才能放行工具；普通文字使旧确认失效，重复确认不重复执行研究。worker 从本次输入产生可信操作；Run 输入和手动状态更新拒绝客户端直接写研究状态。旧 checkpoint、手动历史状态与分支仅恢复草案，避免切换默认 Agent 绕过。
+
+使用及创建专用 Agent 的请求示例见 `docs/learning/agent-testing-bootcamp/RESEARCH_INTEGRATION.md`；逐项证据和限制见 `RESEARCH_INTEGRATION_TEST_REPORT.md`。真实原工厂／worker／HTTP/SSE／事件历史流程和 SQLite 关闭重开均覆盖 full/delta；相关组合验证 **782 passed / 1 skipped**，前端原确认卡相关 **36 passed**。最终审查还修复了范围写入绕过内层权限策略和模型上下文保留标签未中和的问题，均有红绿证据。板块 2 当时的严格全量同名 16 项失败和默认离线保护超时属于历史结果，后续已完成下面的专项修复。
+
+2026-10-19 全量回归修复已完成：修复 Windows 文件长路径、上传元数据、扩展路径声明，适配测试启动器和进程退出，补齐 ReadabiliPy JS 依赖，并以事件同步消除脆弱时序假设。最终默认离线两分片分别 **8504 passed / 183 skipped**（684.45 秒）和 **8502 passed / 186 skipped**（692.34 秒），均退出 0；共选中 17,363 项，其中 **17,006 passed / 357 skipped / 0 failed**，各进程另有相同的 6 项收集阶段跳过，不重复累计。严格 I/O **145 passed / 1 skipped**（19.09 秒）；全局 Ruff check／format 和前端 ESLint／TypeScript 通过。跳过项没有视为通过，Windows ACL、真实外部服务及真实模型质量未据此验证。详情和红绿日志索引见 `docs/learning/agent-testing-bootcamp/REGRESSION_FIX_REPORT.md`，日志位于 `.deer-flow/local-dev/full-regression-fixes/`。根 README 已按阶段追加本轮过程，未改写原有历史记录。
+
+继续验证需保持 `-B`／`PYTHONDONTWRITEBYTECODE=1`，测试进程 PATH 加入已有根 `.venv/Scripts` 中的 uv，配置升级测试使用 `UV_NO_SYNC=1`，专测同步的临时项目会清除此变量。ReadabiliPy 当前 venv 内 JS 依赖已用 `npm.cmd install --ignore-scripts --no-audit --no-fund` 准备；重建 venv 后需重新准备，操作说明在 `backend/tests/AGENTS.md`。GNU Make 本机未安装，依赖它的检查明确 skipped。没有重启用户服务。
+
+未创建本机真实研究 Agent、未运行真实模型研究、未构建 Docker、未提交／推送。运行限制仍只保存和展示，不能用确认卡里的数字声称已自动停止；下一块从结构化产品／证据契约开始。
+
+### 板块 1 历史交付记录
 
 2026-10-19 用户明确要求按完整板块带练：先列全部板块并纳入计划，再发整块开发任务，由用户连续实现、测试与排错，完成后集中讲注意事项、设计取舍及面试题；不每几行代码停下来，也不以“最小改动”代替完整业务交付。当前执行 docs/learning/agent-testing-bootcamp/MODULE_PLAN.md 的 10 个二次开发板块，旧 DAY_BY_DAY.md 诊断日历已标为历史参考。
 
@@ -22,7 +52,7 @@
 
 本轮明确的产品决定：消费者选购优先；只追问决定方向的信息，其他建议统一确认；购买预算允许明确不限；确认前不联网；对象、偏好、交付、运行限制等所有实质范围变化都重新确认。默认中国大陆／CNY／中文／调用方注入日期，建议在摘要中可见。自然语言歧义由后续澄清记录，本块不建通用语义规则引擎。
 
-带练证据：用户按参考代码亲自完成前两个测试及对应实现，截图观察缺少模块和候选边界漏查的两次红灯，并明确报告 `2 passed`；随后说“接下来你自己执行吧，然后输出测试报告”，授权助手完成剩余实现、测试及文档。不得把助手完成部分记为用户独立实现，也不需要为了剩余部分继续停下来带练。
+验证记录：前两个测试复现模块缺失和候选边界漏查，修复后结果为 `2 passed`；随后补齐剩余实现、测试及文档。
 
 本轮已核实定向组合验证 `95 passed in 6.05s`（93 个范围用例、1 个新增严格 I/O 用例、1 个已有 harness 边界用例）；Ruff 检查、格式检查与文档示例执行通过。沙箱内 Windows 事件循环卡在 socketpair 初始化；沙箱外新增严格用例通过。严格全量默认临时路径为 16 failed / 128 passed / 1 skipped，短临时路径为 5 failed / 139 passed / 1 skipped；残留 5 项未导入研究模块也独立复现，不在本块修改范围内。默认离线全量最终状态以范围测试报告为准，不能声称全量绿。
 
@@ -51,20 +81,24 @@
 
 - 用中文，解释正在做什么、为什么以及证据；按完整板块教学，让用户连续实现、验证和解释，完成后集中复盘，卡住时及时给提示。
 - 新对话先总结已确认目标、现有可复用能力和待定项；必要问题使用用户要求的选择模式，每次不超过三个。先查仓库能回答的问题，不重复询问已确认需求或本机配置。
-- 用户曾明确表示“不知道你在干嘛，真的可以学到东西吗”。不要静默完成大量代码，也不要把助手执行当作用户掌握。
+- 持续解释实现目的、验证证据与问题定位，避免静默完成大量改动。
 - 编码前理解需求和代码；只改当前必要内容，保留现有结构，不顺手重构。
-- 先解释再实践，用户亲自实现和验证。入门诊断工具已经启用；主项目改为竞品研究，不能把助手已有参考代码当作用户独立贡献。
+- 先解释再实践。入门诊断工具已经启用；主项目改为竞品研究。
 - **Docker 镜像等开发完成再构建。当前使用 Windows 本机开发；不启动 Docker 构建。**
 - 模型使用已有 DeepSeek；不重复询问选供应商或创建 OpenAI 密钥。
 - 不读取或输出密钥/完整 .env，不索取登录凭据。账号由用户亲自在 UI 创建，保留认证。
-- 不声称未执行的测试、全量通过、用户独立完成或安全问题已彻底解决。
-- 2026-10-19 用户已明确授权将当前尚未上传的项目文件提交并推送到 `origin/main`（`Xixi051108/deerflow-agent-lab`）。此授权限于本轮上传，不包含运行时锁文件、密钥或本地运行数据；后续提交以新的用户授权为准。仍未授权建新 Codex 对话或发送其他对话消息。
+- 不声称未执行的测试、全量通过或安全问题已彻底解决。
+- 测试报告先列“测试用例／预期结果／实际结果”表；红绿灯记录放在用例表后，固定列为“复现／红灯原因／怎么修改／修改后／日志”。环境准备失败单列，实际结果依据执行日志，不用覆盖概述或汇总数字代替用例结果。
+- 项目 README、计划、说明和测试报告聚焦业务流程、实现、问题处理与验证结果，不记录用户与助手的贡献分工。README 后续按阶段追加；本次按明确要求删除既有分工表述。
+- 板块 3 开发期间不提交或推送；补测完成后用户已明确授权提交并推送全部应版本管理的文件，取代开发期间的限制。运行时锁文件、密钥及本地运行数据不纳入业务提交。仍未授权建新 Codex 对话或发送其他对话消息。
 - 不主动使用子 Agent。后续读根目录与相关模块 AGENTS.md，编码按后端 TDD 要求执行。
 
 ## 3. 仓库与未提交状态
 
+本节下方保留早期交接快照。本轮开发起点 HEAD 为 `609e88c`；板块二改动尚未提交，实际状态以 `git status` 为准。`.extensions_config.json.lock` 原已存在，保持未跟踪，不纳入业务改动。
+
 - 当前分支：main。
-- 当前 HEAD：768124c（chore: initialize DeerFlow v2.1.0 source and local setup scripts）。
+- 早期基线 HEAD：768124c（chore: initialize DeerFlow v2.1.0 source and local setup scripts）；当前实际 HEAD 为第 1 节核实的 609e88c。
 - 上游源码基线：DeerFlow v2.1.0，提交 345f08be00c8a9495079b732a39b46aa9af1584e。
 - 上游引入、完整性、安全软件拦截历史：docs/UPSTREAM.md。
 - 本次交接前 git status：
@@ -74,7 +108,7 @@
   - 新增：backend/tests/blocking_io/test_task_diagnosis_tools.py。
   - 新增：docs/learning/（下述学习资料）。
   - 运行时未跟踪文件：.extensions_config.json.lock，勿当功能文件提交。
-- 本节列的是提交前工作区快照；本轮已获得上传授权，实际提交与远程同步状态以 `git status`、`git log` 和远程分支核对为准。不要覆盖已有改动。
+- 本节列表保留早期工作区快照，当时有上传授权；本次板块 3 明确不提交推送。实际状态以第 1 节和 `git status` 为准，不要覆盖已有改动。
 - 最后检查还发现 frontend/AGENTS.md 有修改，diff 仅追加 BEGIN:nextjs-agent-rules 提示块；本轮未编辑或删除该文件，已保留。不要把它混入竞品研究业务实现。
 - config.yaml、extensions_config.json、.env、.deer-flow/ 与虚拟环境属于本地配置/运行数据，保持忽略。
 
@@ -89,7 +123,7 @@ Windows / PowerShell，Python 3.12。开发入口：
 - Next.js rewrites 将 /api/langgraph/* 转发到 Gateway /api/*，本机无需 Nginx。
 - 已保留原有认证，用户自行创建本地管理员。
 - 模型：deepseek-flash，根目录 .env 中已有 DEEPSEEK_API_KEY；禁止打印内容。
-- 本地 config.yaml 使用 deerflow.models.patched_deepseek:PatchedChatDeepSeek，官方 DeepSeek API。两个合成诊断工具现已启用：用户取消注册项注释，助手只修正六行多出的一个空格，并验证解析、注册、导入与直接调用。
+- 本地 config.yaml 使用 deerflow.models.patched_deepseek:PatchedChatDeepSeek，官方 DeepSeek API。两个合成诊断工具现已启用：取消注册项注释并修正六行多出的一个空格，已验证解析、注册、导入与直接调用。
 - extensions_config.json 是空 MCP 等扩展配置。
 - 后端锁定环境：backend/.venv。根 .venv 用于早期环境检查/uv，勿混淆。
 - 本次通过 backend/.venv 的包元数据复核：langchain 1.3.14、langchain-core 1.4.9、langchain-deepseek 1.0.1、langgraph 1.2.9。
@@ -195,7 +229,7 @@ C:/Users/43521/AppData/Local/Temp/codex-clipboard-5a13f1e2-da9e-416c-ba4e-d2e29f
 2. 第 1 节选择题已有明确答案，不要重复询问。市场分析专属范围在该用途实施前细化；当前先形成消费者完整闭环。
 3. 需求草案已有手机、电脑与证据不足样例，以及业务／系统链路、复用模块和分层测试方案；据用户反馈调整，不把草案当作已通过的验收。
 4. 先读 BASELINE_REPORT.md，手机与笔记本的少量真实基线已运行，不重复当作未做。笔记本 Thread 为 09bde3a7-7c4a-4a10-94eb-b880933b587a，研究 Run 为 9785ba42-507f-465c-8393-e2630369aece，后台 interrupted、53 次汇总模型调用、1,409,915 tokens，其中主 Agent 1,215,543、中间件 194,372。没有报告文件；10 分钟是本次外部实验保护，不是产品默认预算。先用受控用例定位有限检索／停止／部分交付，再校准默认上限；来源失败根因不能仅凭模型解释认定。
-5. 先读 RESEARCH_SCOPE.md 与 RESEARCH_SCOPE_TEST_REPORT.md，确认板块 1 的接口和验证限制；不要重新从预算示例或两个入门测试开始。下一步规划板块 2：可信用户回答 → 确认记录 → ThreadState 保存恢复 → 实际研究动作准入；范围内普通澄清 Run 仍须可创建。JSON 恢复不是 checkpoint 接线，也不证明认证；expected_version 不是数据库并发锁。
+5. 先读 RESEARCH_SCOPE.md、RESEARCH_INTEGRATION.md、RESEARCH_DATA.md 及对应报告，确认板块 1–3 已实现；不要重做范围、接线、数据契约或入门测试。下一步是 MODULE_PLAN.md 板块 4 的候选发现与比较维度规划。确认前普通澄清 Run 仍可创建；引用结构检查不等于事实核实，expected_revision 也不是数据库并发锁。复用当前工具和原运行互斥，不另建研究执行器。
 6. workspace 空目录、demo 不存在、自主调用 ls，以及 T1001／T9999 均已核对；无需重复当作尚未运行的实验。市场研究的功能和评测尚未完成。
 7. 如用户另要求修复根目录 ls，再按工具级复现、失败测试、最小修复和隔离回归推进，不能仅删除安全校验。当前没有要求修复它。
 
@@ -228,15 +262,17 @@ C:/Users/43521/AppData/Local/Temp/codex-clipboard-5a13f1e2-da9e-416c-ba4e-d2e29f
 - config.example.yaml 中注册项和工具组仍默认注释；本地 config.yaml 已启用两工具，完成 T1001、T9999 两个真实模型场景，属于入门样例。
 - 单测覆盖输入、事实、未知记录、动态加载/分组、真实 assemble_lead_agent（仅模型替身）及执行；另有 blocking-I/O 测试。
 - README.md 与 backend/AGENTS.md 记录新增工具。
-- 不把助手已写出的代码当作用户个人贡献，后续需要讲解和用户独立改动/故障练习。
+- 后续通过讲解、需求变更与故障练习复盘实现和验证方法。
 
 资料目录：docs/learning/agent-testing-bootcamp/
 
-- MODULE_PLAN.md：10 个二次开发板块、开发任务与退出条件；板块 1 独立规则已实现，板块 2 待接线。
+- MODULE_PLAN.md：10 个二次开发板块、开发任务与退出条件；板块 1–3 已实现，下一步板块 4。
 - README.md：学习入口；DAY_BY_DAY.md：旧诊断日历，已标为历史参考，不再执行。
 - PROJECT_AND_INTERVIEWS.md：新主项目方向、双岗位能力与证据地图、已完成记录。原日历后续内容需按新项目重新核定，不能机械继续小功能练习。
 - RESEARCH_AGENT_REQUIREMENTS.md：已确认产品需求与 2026-10-19 范围确认决策，其他业务／系统链路、验收和测评草案仍待实现。
-- RESEARCH_SCOPE.md / RESEARCH_SCOPE_TEST_REPORT.md：本轮独立规则接口、完整示例、信任边界、测试证据、回归限制和本人／AI 贡献。
+- RESEARCH_SCOPE.md / RESEARCH_SCOPE_TEST_REPORT.md：本轮独立规则接口、完整示例、信任边界、测试证据与回归限制。
+- RESEARCH_INTEGRATION.md / RESEARCH_INTEGRATION_TEST_REPORT.md：板块二接口、配置示例、原确认卡与准入链路、SQLite／HTTP／SSE 证据、历史回放与分支隔离、red→green 记录。
+- RESEARCH_DATA.md / RESEARCH_DATA_TEST_REPORT.md：板块三数据契约、快照和分页、权限与生命周期、受控样本、红绿／定向／全量结果和双岗位复盘。
 - BASELINE_REPORT.md：首轮真实手机研究、价格补证及笔记本研究的观察；笔记本人工中止，后台用量与 UI 口径分开记录，不能宣称业务验收通过。
 - WORKBOOK.md、LESSON_01.md：练习与第一课。
 - LOCAL_RUN.md：原版启动、真实基线、命令与链路。
@@ -254,9 +290,9 @@ C:/Users/43521/AppData/Local/Temp/codex-clipboard-5a13f1e2-da9e-416c-ba4e-d2e29f
 - 已新增研究范围规则及对应测试；没有新增业务路由、ThreadState 字段、数据库表、业务技能、面板或真实模型评测集。范围接口已实现；运行预算默认值、其余业务接口和正式评测门槛仍待确定。规则验证不代表完整研究交付。
 - 本次最后更新交接时确认：tasks.json 中没有 T1007，测试文件中没有 test_cancelled_task_returns_status_without_error；取消状态练习尚未实施，且已暂停。
 
-## 10. 测试结果：历史证据，交接本轮未重跑
+## 10. 测试结果：早期诊断历史证据
 
-证据文档：docs/learning/agent-testing-bootcamp/VERIFICATION.md。
+证据文档：docs/learning/agent-testing-bootcamp/VERIFICATION.md。以下保留早期记录；最新全量结果见第 1 节和 REGRESSION_FIX_REPORT.md，不以本节历史状态代替当前结果。
 
 下述为早先诊断练习证据：终端截图显示 test_missing_evidence_is_explicit 两组参数 2 passed in 2.69s；test_failed_task_returns_synthetic_evidence 为 1 passed in 1.49s。这些不能归给新主项目。本轮范围规则和全量回归尝试的结果另见 RESEARCH_SCOPE_TEST_REPORT.md；不要把历史测试与本轮结果混计。
 
@@ -270,11 +306,11 @@ C:/Users/43521/AppData/Local/Temp/codex-clipboard-5a13f1e2-da9e-416c-ba4e-d2e29f
 广泛回归曾 fail-fast 停止：
 - 默认后端：1732 passed、30 skipped、3 deselected、1 failed。首个失败 test_bench_sandbox_provider.py::test_boxlite_shim_workaround_retries_after_fixing_permissions，Windows st_mode & 0o111。
 - 严格 blocking-I/O：36 passed、1 failed。test_channel_runtime_config_store.py::test_runtime_config_store_file_is_owner_only，Windows mode 0666 vs 0600。
-- 位于未改模块，尚未解决；不能声称全量绿。尤其凭据存储要核实实际 ACL，不能只改断言/skip。
+- 当时位于未改模块，尚未解决；本轮已修复平台适配并完成全量复跑。凭据存储的 Windows ACL 安全仍未专项核实，POSIX 权限位适配不构成 ACL 安全证明。
 - 部分受限测试启动曾 WinError 5（临时目录权限），属于环境准备失败。
 - 记录：backend/.diagnosis-default.local、.diagnosis-blocking.local、.diagnosis-check.local。
 
-尚未完成：真实模型 20 场景评测、完整 HTTP 模型替身链路的全部计划验收、UI 自动化、故障练习 3 例、性能实验、远程 CI、简历/演示/投递材料。不要把两周计划写成全部已交付。
+后续仍需：真实模型 20 场景评测、UI 自动化、故障练习 3 例、性能实验、远程 CI、简历/演示/投递材料。板块 2 HTTP/SSE 模型替身验收已完成，详见对应报告；不要把两周计划写成全部已交付。
 
 ## 11. 火绒告警与不得重复的风险操作
 
@@ -283,6 +319,8 @@ backend/packages/harness/deerflow/skills/skillscan/__pycache__/orchestrator.cpyt
 
 HEUR:Trojan/Python.ReverseShell.f，病毒 ID 25B49D93CA5A73B8。
 当时进程 D:\index\python.exe，命令 python.exe -，父进程为 Codex pwsh。
+
+后续严格 pytest 与临时 LangGraph Studio 服务也触发同一路径、同一病毒 ID 的告警；已停止当时测试并核对临时服务退出。之后所有测试继承禁写字节码设置。源码再次核对与 Git 一致，不能据此鉴定已被删除的 pyc 或宣称厂商确认误报。
 
 此前已核对源码未修改且匹配固定上游：
 - blob be09e74aa5177731155b02a76f61da13f06d7ea8。

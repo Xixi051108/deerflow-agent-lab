@@ -63,6 +63,9 @@ already installed; a plain `install` still refuses an already-snapshotted local 
 Failed upgrades restore the previous snapshot even when a concurrent dependency-file edit
 blocks lock/pyproject rollback, then leave that operator edit in place.
 
+Managed local source arguments use forward-slash relative paths on every host,
+including Windows, so uv declarations remain portable across deployment systems.
+
 Local-directory installs are snapshots, not editable links. The manager validates the
 source, derives the destination from the normalized distribution name, and copies it to
 `backend/extensions/sources/<distribution>/`. It ignores Git metadata, virtual

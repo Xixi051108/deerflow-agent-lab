@@ -477,3 +477,21 @@ def test_full_offline_workflow_from_vague_input_to_reconfirmation():
     renewed = prepare_confirmation(revised)
     reconfirmed = respond_to_confirmation(renewed, reply(renewed))
     assert require_confirmed_scope(reconfirmed).preferences == ("偏好直播",)
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_new_user_text_invalidates_confirmation_even_without_a_scope_change(confirmed):
+    from deerflow.agents.research.scope import invalidate_confirmation, prepare_confirmation, respond_to_confirmation
+
+    pending = pending_session()
+    session = respond_to_confirmation(pending, reply(pending)) if confirmed else pending
+    invalidated = invalidate_confirmation(session)
+
+    assert invalidated.scope == session.scope
+    assert invalidated.scope_version == session.scope_version
+    assert invalidated.research_id == session.research_id
+    assert invalidated.confirmation is None
+    assert invalidated.pending_confirmation is None
+    renewed = prepare_confirmation(invalidated)
+    assert renewed.pending_confirmation.request_id != pending.pending_confirmation.request_id
+    assert invalidate_confirmation(invalidated) == invalidated

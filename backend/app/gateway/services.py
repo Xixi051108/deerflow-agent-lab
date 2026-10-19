@@ -43,6 +43,7 @@ from deerflow.agents.middlewares.message_utils import _SUMMARY_MESSAGE_NAME
 from deerflow.agents.middlewares.tool_receipt import TOOL_RECEIPT_KEY, TOOL_RECEIPT_LEDGER_KEY
 from deerflow.agents.middlewares.tool_transform_meta import TOOL_TRANSFORMS_KEY
 from deerflow.agents.middlewares.view_image_middleware import _IMAGE_CONTEXT_MESSAGE_MARKER_KEY
+from deerflow.agents.research.runtime import RESEARCH_TURN_KEY
 from deerflow.config.app_config import get_app_config
 from deerflow.config.database_config import resolve_checkpoint_graph_cache_max
 from deerflow.projects.context import PROJECT_CONTEXT_MESSAGE_MARKER, resolve_project_context
@@ -418,6 +419,8 @@ def strip_server_owned_state_metadata(values: Mapping[str, Any]) -> dict[str, An
     channels can carry messages too, and popping a key that was never there
     costs nothing.
     """
+    if "research" in values:
+        raise HTTPException(status_code=422, detail="research is server-owned; submit a user message or confirmation card response")
     stripped: dict[str, Any] = {}
     for channel, value in values.items():
         if channel == "delegations" and isinstance(value, list):
@@ -465,6 +468,8 @@ def normalize_input(raw_input: dict[str, Any] | None, *, trusted_internal: bool 
     """
     if raw_input is None:
         return {}
+    if "research" in raw_input:
+        raise HTTPException(status_code=422, detail="research is server-owned; submit a user message or confirmation card response")
     result = raw_input
     messages = raw_input.get("messages")
     if messages and isinstance(messages, list):
@@ -544,6 +549,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: frozenset[str] = (
             "__run_loop_detection_recorder",
             "__run_tool_promotion_recorder",
             "__run_tool_progress_recorder",
+            RESEARCH_TURN_KEY,
             "langgraph_auth_user",
             "langgraph_auth_user_id",
             # Server-owned pinned project snapshot (spec §7.1): resolved once

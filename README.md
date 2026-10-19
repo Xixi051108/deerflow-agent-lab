@@ -1853,7 +1853,8 @@ See [backend/docs/TUI.md](backend/docs/TUI.md) for the full guide.
 ## Documentation
 
 - [Agent and Testing Learning Guide (Chinese)](docs/learning/agent-testing-bootcamp/README.md) - Guided changes on the DeerFlow runtime, including optional read-only synthetic task diagnosis tools
-- [Research Scope Rules (Chinese)](docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md) - Offline scope validation and version-bound confirmation rules; chat, persistence, and research execution integration are still pending
+- [Research Scope Rules (Chinese)](docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE.md) - Offline scope validation and version-bound confirmation rules
+- [Research Agent Integration (Chinese)](docs/learning/agent-testing-bootcamp/RESEARCH_INTEGRATION.md) - Opt-in custom agents (`research_enabled: true`) use the original confirmation cards and checkpoints, with execution-time admission checks. New user text requires reconfirmation. Runtime limits are declared only; budget enforcement, evidence contracts, reports, and the research panel remain later modules. See the linked setup example and test report.
 - [Contributing Guide](CONTRIBUTING.md) - Development environment setup and workflow
 - [Configuration Guide](backend/docs/CONFIGURATION.md) - Setup and configuration instructions
 - [Architecture Overview](backend/CLAUDE.md) - Technical architecture details
@@ -1951,3 +1952,48 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 ## Star History
 
 [![Star History Chart](https://star-history.dera.page/svg?repos=bytedance/deer-flow&type=Date)](https://star-history.dera.page/#bytedance/deer-flow&Date)
+
+## 竞品分析 Agent 项目过程（持续追加）
+
+基于 DeerFlow 原有链路二次开发，优先实现消费者选购场景，逐步补齐范围确认、证据采集、预算控制和报告交付。以下按阶段记录关键工作；后续只追加新记录，纠错也以补充说明保留原记录。
+
+### 基线测试：观察原版能力（2026-10-18）
+
+- **做了什么：** 在 Windows 本机使用已有 DeepSeek，实际运行手机推荐、价格补证和笔记本选购，核对页面结果与后台运行记录。
+- **发现问题：** 原版能澄清、检索和推荐，但旧发布价不能证明当前到手价；笔记本研究约 10 分钟仍未交付报告，后台累计用量约 141 万 token。
+- **如何处理：** 追加价格补证要求后，仍未取得目标当前价；笔记本研究人工停止。将这些缺口纳入后续开发，先做范围约束，再做证据与预算控制；本轮未完成缺口修复。
+- **结果：** 建立真实问题样本。10 分钟是实验观察上限，不是已实现的自动停止规则；少量样本不代表完整评测。详见 [基线报告](docs/learning/agent-testing-bootcamp/BASELINE_REPORT.md)。
+
+### 第一阶段：研究范围校验与确认约束（2026-10-19）
+
+- **做了什么：** 新增范围规则模块，表达研究对象、候选边界、购买条件和运行限制；确认绑定研究标识、范围版本、请求与完整快照，范围变化后旧确认失效。
+- **发现问题：** 首轮测试暴露模块缺失；补齐目标后又因漏查候选边界，错误判断范围已完整。后续还发现错误类型及数字日期被意外接受。
+- **如何解决：** 按失败测试逐步实现完整性检查，补齐候选、输入类型和日期边界；分别校验范围完整、明确确认和研究准入。
+- **结果：** 定向组合 **95 passed**。本阶段验证独立规则，尚不能证明原 Agent 的工具执行被拦截。详见 [阶段一测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_SCOPE_TEST_REPORT.md)。
+
+### 第二阶段：原 Agent 链路接入与状态持久化（2026-10-19）
+
+- **做了什么：** 增加专用 Agent 开关，将范围工具、原确认卡和研究状态接入原链路；通过 checkpoint 跨 Run 保存，并在同步、异步工具实际执行前校验确认。
+- **发现问题：** 历史回放、分支和切换 Agent 存在复用旧确认或绕过门槛的路径；混合工具批次可能提前执行搜索；范围写入还曾绕过原权限链。
+- **如何解决：** 只消费当前请求中的可信操作，校验卡片与研究绑定；新普通文字先清除确认，回放和分支重新确认；阻止范围写入与研究动作同批执行，保留原权限检查。
+- **结果：** 后端相关组合 **782 passed / 1 skipped**，前端确认卡相关 **36 passed**，相关 Ruff 与前端检查通过。覆盖确认前阻止、跨 Run 确认后放行、修改后再次阻止，以及 SQLite full／delta 关闭重开恢复。详见 [阶段二测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_INTEGRATION_TEST_REPORT.md)。
+
+### 全量回归问题与当前边界（2026-10-19）
+
+- **严格 I/O 全量未通过：** 第二阶段修改前后均为同名的 16 项失败：12 项触发 Windows 路径过长、3 项文件权限位断言不适配、1 项模拟 Lark CLI 未识别。第一阶段用短临时目录复测后，11 项路径失败通过，但仍有转换、权限及 CLI 共 5 项失败，尚未修复。
+- **默认离线全量未跑完：** 第一阶段在 600 秒、第二阶段在 180 秒达到外层验证脚本的保护上限；日志已出现失败标记，具体失败仍待定位，不能仅归因于超时，也不能认定与本次改动无关。
+- **尚未交付：** 完整真实模型研究、证据契约、预算计数与自动停止、报告和研究面板。下一阶段开发研究数据与证据契约；全量回归问题继续保留跟踪。
+
+### 全量回归修复：完成 Windows 离线验证（2026-10-19）
+
+- **做了什么：** 对此前全量失败逐项复现、定位并修复，完成默认离线全集、严格 I/O、后端 Ruff 和前端检查。
+- **问题与解决：** 修复 Windows 长路径与上传路径元数据，适配 CLI 启动和服务正常退出；补齐网页提取器 JS 依赖，隔离测试环境变量，用事件同步替代脆弱的启动时序假设。安全软件连续告警后停止当时测试，后续禁写 Python 字节码并保持防护开启。
+- **验证结果：** 默认离线两分片共选中 17,363 项，**17,006 passed / 357 skipped / 0 failed**；各进程另有相同的 6 项收集阶段跳过，不重复累计。严格 I/O **145 passed / 1 skipped**；全局 Ruff、前端 ESLint 和 TypeScript 通过。使用正常临时目录完成回归。
+- **保留边界：** GNU Make 缺失、平台不适用及外部服务未配置等检查明确跳过，不计为通过；Windows ACL 和真实模型研究质量仍待专项验证。此前失败记录保留为历史，详细原因与红绿证据见 [全量回归修复报告](docs/learning/agent-testing-bootcamp/REGRESSION_FIX_REPORT.md)。下一业务阶段仍为研究数据与证据契约。
+
+### 第三阶段：研究数据与证据契约（2026-10-19）
+
+- **做了什么：** 增加开放品类的产品／配置／维度／来源／事实／评价／推断／引用／缺口／冲突契约。原研究 Agent 新增受校验写入和分页读取工具，完整结果以不可变 JSON 快照存储，checkpoint 只保留有界索引；复用原权限、确认、HTTP/SSE 与持久化链路。
+- **问题与解决：** 先用手机和笔记本合成样本复现模块及工具缺失，补齐完整关系校验与读写。后续复现来源保留标签进入模型请求、Windows junction 将研究目录指向沙箱两项问题；分别通过请求级标签中和、收紧当前研究目录边界修复并增加回归。磁盘失败、取消后晚完成的文件、范围变化、历史恢复和分支均不得错误推进当前结果。
+- **验证结果：** 定向组合 **210 passed**，含本块 66 个新用例；开发后默认离线全集共选中 17,428 项，**17,071 passed / 357 skipped / 0 failed**，收集阶段的重复跳过另行列明；严格 I/O **146 passed / 1 skipped**，全局 Ruff check／format 通过。开发前后结果、日志与分母口径见 [板块三测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_DATA_TEST_REPORT.md)。
+- **边界与下一步：** 引用结构合法不等于事实或当前价格已核实；本阶段没有运行真实模型研究、实现预算停止或交付报告／面板。下一块为候选发现与比较维度规划。接口、存储规则及复盘见 [研究数据说明](docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md)。

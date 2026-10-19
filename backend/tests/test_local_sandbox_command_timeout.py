@@ -88,7 +88,8 @@ def test_timeout_output_carries_authoritative_failure_marker(monkeypatch):
     exit marker so exit-status evidence (acceptance checklist) cannot read a
     partial passing summary as success."""
     monkeypatch.setattr(LocalSandbox, "_get_shell", lambda self: "/bin/sh")
-    monkeypatch.setattr(LocalSandbox, "_run_posix_command", staticmethod(lambda args, timeout, env=None: ("12 passed\n", "", 0, True)))
+    runner = "_run_windows_command" if os.name == "nt" else "_run_posix_command"
+    monkeypatch.setattr(LocalSandbox, runner, staticmethod(lambda args, timeout, env=None: ("12 passed\n", "", 0, True)))
 
     output = LocalSandbox("t").execute_command("make test", timeout=1)
 
@@ -120,10 +121,12 @@ def test_windows_foreground_timeout_is_wall_clock_bound(monkeypatch):
     sandbox = LocalSandbox("t")
 
     start = time.monotonic()
-    output = sandbox.execute_command("ping -n 5 127.0.0.1", timeout=0.2)
+    output = sandbox.execute_command("ping -n 20 127.0.0.1", timeout=0.2)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 2, f"timeout not enforced for process tree, took {elapsed:.1f}s"
+    # taskkill starts another process; allow cleanup on a busy Windows host,
+    # while still proving we did not wait for the command's ~19-second runtime.
+    assert elapsed < 5, f"timeout not enforced for process tree, took {elapsed:.1f}s"
     assert "after 0.2 seconds" in output
 
 

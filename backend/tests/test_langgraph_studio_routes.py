@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -118,6 +119,7 @@ def _running_studio_server(
             stdout=log_file,
             stderr=subprocess.STDOUT,
             text=True,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
         )
 
         base_url = f"http://127.0.0.1:{port}"
@@ -150,7 +152,11 @@ def _running_studio_server(
             yield client
         finally:
             client.close()
-            process.terminate()
+            if os.name == "nt":
+                # terminate() is a hard kill on Windows and skips persistence flush.
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:

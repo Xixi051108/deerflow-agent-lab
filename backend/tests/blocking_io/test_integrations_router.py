@@ -36,8 +36,15 @@ def _build_lark_archive(archive: Path) -> None:
             zf.writestr(f"cli-1.0.65/skills/{skill_name}/references/readme.md", f"# {skill_name}\n")
 
 
-def _write_stub_lark_cli(path: Path) -> None:
+def _write_stub_lark_cli(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        path = path.with_suffix(".cmd")
+        path.write_text(
+            '@echo off\nif "%~1"=="--version" (echo v1.0.65 & exit /b 0)\nif "%~2"=="status" (echo {"identities":{"user":{"userName":"Alice"}}} & exit /b 0)\necho {}\n',
+            encoding="utf-8",
+        )
+        return path
     path.write_text(
         """#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -61,6 +68,7 @@ exit 0
         encoding="utf-8",
     )
     path.chmod(0o755)
+    return path
 
 
 def _reset_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,8 +127,7 @@ async def test_lark_install_route_does_not_block_event_loop(tmp_path: Path, monk
 async def test_lark_auth_complete_route_does_not_block_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _reset_paths(tmp_path, monkeypatch)
     config = await _config(tmp_path)
-    cli_path = tmp_path / "bin" / "lark-cli"
-    await asyncio.to_thread(_write_stub_lark_cli, cli_path)
+    cli_path = await asyncio.to_thread(_write_stub_lark_cli, tmp_path / "bin" / "lark-cli")
 
     monkeypatch.setenv("PATH", f"{cli_path.parent}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setattr(integrations, "get_effective_user_id", lambda: "loop-user")

@@ -497,6 +497,7 @@ def build_middlewares(
     authorization_provider=None,
     extensions=None,
     subagent_execution_capacity: int | None = None,
+    research_enabled: bool = False,
 ):
     """Build the lead-agent middleware chain based on runtime configuration.
 
@@ -549,6 +550,11 @@ def build_middlewares(
     if authorization_provider is not None and deferred_setup is not None:
         runtime_middleware_kwargs["deferred_setup"] = deferred_setup
     middlewares = build_lead_runtime_middlewares(**runtime_middleware_kwargs)
+    # Outside sandbox/tool wrappers, including when a caller switches away from
+    # the original research agent. Ordinary threads take the dormant fast path.
+    from deerflow.agents.research.middleware import ResearchScopeMiddleware
+
+    middlewares.insert(1, ResearchScopeMiddleware(enabled=research_enabled, agent_name=agent_name))
 
     # Always inject current date (and optionally memory) as <system-reminder> into the
     # first HumanMessage to keep the system prompt fully static for prefix-cache reuse.
@@ -1183,6 +1189,10 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         app_config=resolved_app_config,
     )
     configured_tools = raw_tools + extra_tools
+    if getattr(agent_config, "research_enabled", False):
+        from deerflow.agents.research.tools import RESEARCH_TOOLS
+
+        configured_tools.extend(RESEARCH_TOOLS)
     if non_interactive:
         configured_tools = [tool for tool in configured_tools if tool.name not in _NON_INTERACTIVE_DISABLED_TOOL_NAMES]
     authorization_candidates = [*configured_tools]
@@ -1220,6 +1230,7 @@ def _assemble_lead_agent(config: RunnableConfig, *, app_config: AppConfig) -> Le
         user_id=resolved_user_id,
         authorization_provider=_authz_provider,
         subagent_execution_capacity=subagent_execution_capacity,
+        research_enabled=getattr(agent_config, "research_enabled", False),
     )
     system_prompt = apply_prompt_template(
         subagent_enabled=subagent_enabled,

@@ -38,6 +38,7 @@ from langgraph.types import Overwrite
 
 from deerflow.agents.goal_state import GoalEvaluation, GoalState
 from deerflow.agents.middlewares.input_sanitization_middleware import neutralize_untrusted_tags
+from deerflow.agents.research.runtime import RESEARCH_TURN_KEY, extract_research_turn, reopen_research_for_replay
 from deerflow.config.app_config import AppConfig
 from deerflow.config.database_config import CheckpointChannelMode
 from deerflow.constants import CONVERSATION_READER_CONTEXT_KEY, TOOL_RESULTS_DIRNAME
@@ -201,6 +202,7 @@ def _release_run_scoped_references(
     internal_context_keys = {
         "__run_journal",
         CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
+        RESEARCH_TURN_KEY,
         CONVERSATION_READER_CONTEXT_KEY,
     }
     try:
@@ -520,6 +522,7 @@ _SERVER_OWNED_RUNTIME_CONTEXT_KEYS: Final[frozenset[str]] = (
     frozenset(
         {
             CURRENT_RUN_PRE_EXISTING_MESSAGE_IDS_KEY,
+            RESEARCH_TURN_KEY,
             DEERFLOW_TRACE_METADATA_KEY,
             CONVERSATION_READER_CONTEXT_KEY,
             "is_subagent",
@@ -1081,6 +1084,7 @@ async def run_agent(
             extensions,
             ctx.conversation_reader,
         )
+        runtime_ctx[RESEARCH_TURN_KEY] = extract_research_turn(graph_input)
         # Bind every checkpoint produced by this run to the effective agent
         # identity that produced its state. Manual compaction uses only this
         # server-overwritten value for memory policy; request metadata cannot
@@ -1184,6 +1188,19 @@ async def run_agent(
                 if rollback_point is not None:
                     pre_run_checkpoint_id = rollback_point.config.get("configurable", {}).get("checkpoint_id")
                     pre_existing_message_ids = _collect_pre_existing_message_ids({"messages": list(rollback_point.messages)})
+
+                # Selecting a checkpoint must not resurrect an older receipt or
+                # remove a gate by selecting a pre-research snapshot. Read both
+                # materialized states under the existing thread-write boundary.
+                if config.get("configurable", {}).get("checkpoint_id") or config.get("configurable", {}).get("checkpoint_map"):
+                    head = await accessor.aget(checkpoint_config)
+                    selected = await accessor.aget({"configurable": dict(config["configurable"])})
+                    research = selected.values.get("research") or head.values.get("research")
+                    if research is not None:
+                        if not isinstance(graph_input, dict):
+                            raise ValueError("Research replay requires a new user message and scope confirmation")
+                        graph_input = {**graph_input, "research": reopen_research_for_replay(research)}
+                        runtime_ctx[RESEARCH_TURN_KEY] = {"kind": "text"}
 
                 # Resuming from an older checkpoint is a fork, and a delta fork
                 # materializes the abandoned sibling's writes back into state

@@ -173,9 +173,9 @@ def test_upload_files_deduplicates_max_length_filenames_without_failing_the_batc
     assert deduped_name != max_length_name
     assert deduped_name.endswith("_1.txt")
     assert len(deduped_name.encode("utf-8")) <= 255
-    assert (thread_uploads_dir / "innocent.txt").read_bytes() == b"kept"
-    assert (thread_uploads_dir / max_length_name).read_bytes() == b"first"
-    assert (thread_uploads_dir / deduped_name).read_bytes() == b"second"
+    assert Path(result.files[0].path).read_bytes() == b"kept"
+    assert Path(result.files[1].path).read_bytes() == b"first"
+    assert Path(result.files[2].path).read_bytes() == b"second"
 
 
 def test_upload_files_skips_acquire_when_thread_data_is_mounted(tmp_path):

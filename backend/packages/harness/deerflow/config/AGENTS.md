@@ -1,5 +1,17 @@
 ### Configuration System
 
+`Paths.user_projects_dir()` uses Windows extended filesystem paths so shelf
+hash namespaces and valid 255-byte filenames remain usable without OS policy
+changes. `as_windows_extended_path()` handles drive and UNC paths and is
+idempotent. Keep database URLs on the ordinary base directory; normalize both
+sides of upload confinement checks before resolving and comparing paths.
+
+Custom Agent `research_enabled` is a strict boolean, default false. Existing agent
+create/update/read APIs carry it; omitted updates and the harness `update_agent`
+preserve it through the existing config document. It is not a request-context
+override. A persisted research thread keeps its execution gate even if callers
+switch agents or disable this flag; see `../agents/AGENTS.md`.
+
 Custom Agent `AgentConfig.display_name` is an optional, whitespace-trimmed Unicode
 label of at most 100 Unicode code points. C0/C1 controls and bidirectional
 formatting controls (U+202A–U+202E, U+2066–U+2069) are rejected before trimming.

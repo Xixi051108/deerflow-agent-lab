@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from support.shell import require_make
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
@@ -50,6 +51,10 @@ def _collect_live_tests(
         ),
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
     }
+    # Windows needs SystemRoot to initialize Winsock even during collection.
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if name in os.environ:
+            env[name] = os.environ[name]
     if opt_in:
         env[LIVE_OPT_IN] = "1"
     if ci:
@@ -87,7 +92,7 @@ def _assert_collection_skipped(result: subprocess.CompletedProcess[str], reason:
 
 def _dry_run_make_target(target: str, *extra: str) -> str:
     result = subprocess.run(
-        ["make", "-n", target, *extra],
+        [require_make(), "-n", target, *extra],
         cwd=BACKEND_ROOT,
         capture_output=True,
         text=True,

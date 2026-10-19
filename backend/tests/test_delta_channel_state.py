@@ -2,7 +2,7 @@ import copy
 from typing import get_type_hints
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from langchain.agents import AgentState, create_agent
 from langchain.agents.middleware import AgentMiddleware
@@ -97,6 +97,9 @@ def test_merge_message_writes_matches_sequential_add_messages(writes: list) -> N
     assert merge_message_writes([], writes) == _fold([], writes)
 
 
+# Unicode strategy initialization can exceed the generation health-check budget
+# on Windows; these properties test merge semantics, not generator performance.
+@settings(suppress_health_check=[HealthCheck.too_slow])
 @given(case=_message_merge_cases())
 def test_merge_message_writes_randomized_differential(case: tuple[list, list]) -> None:
     state, writes = case
@@ -120,6 +123,7 @@ def test_merge_message_writes_is_batching_invariant(split: int) -> None:
     assert merge_message_writes(merge_message_writes(state, xs), ys) == merge_message_writes(state, writes)
 
 
+@settings(suppress_health_check=[HealthCheck.too_slow])
 @given(case=_message_merge_cases(), data=st.data())
 def test_merge_message_writes_randomized_batching_invariance(case: tuple[list, list], data: st.DataObject) -> None:
     state, writes = case

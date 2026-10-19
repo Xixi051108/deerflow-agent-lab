@@ -389,6 +389,10 @@ class DeerFlowClient:
         max_total_subagents = cfg.get("max_total_subagents", self._app_config.subagents.max_total_per_run)
 
         tools = self._get_tools(model_name=model_name, subagent_enabled=subagent_enabled)
+        if getattr(agent_config, "research_enabled", False):
+            from deerflow.agents.research.tools import RESEARCH_TOOLS
+
+            tools = [*tools, *RESEARCH_TOOLS]
 
         # Add framework-provided tools before authorization so Layer 1 sees
         # every capability that can become model-visible.
@@ -448,6 +452,7 @@ class DeerFlowClient:
                     user_id=effective_user_id,
                     authorization_provider=_authz_provider,
                     subagent_execution_capacity=subagent_execution_capacity,
+                    research_enabled=getattr(agent_config, "research_enabled", False),
                 ),
                 self._checkpoint_channel_mode,
                 self._checkpoint_snapshot_frequency,
@@ -968,6 +973,9 @@ class DeerFlowClient:
         self._ensure_agent(config, context=context)
 
         state: dict[str, Any] = {"messages": [HumanMessage(content=message, additional_kwargs={"run_id": run_id})]}
+        from deerflow.agents.research.runtime import RESEARCH_TURN_KEY, extract_research_turn
+
+        context[RESEARCH_TURN_KEY] = extract_research_turn(state)
         context[DEERFLOW_TRACE_METADATA_KEY] = deerflow_trace_id
         if self._agent_name:
             context["agent_name"] = self._agent_name
@@ -1185,6 +1193,7 @@ class DeerFlowClient:
                     "summary_text": chunk.get("summary_text"),
                     "messages": [self._serialize_message(m) for m in messages],
                     "artifacts": chunk.get("artifacts", []),
+                    **({"research": chunk["research"]} if chunk.get("research") is not None else {}),
                 },
             )
 

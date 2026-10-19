@@ -278,6 +278,7 @@ def merge_skill_context(existing: list[SkillEntry] | None, new: list[SkillEntry]
 
 
 class ThreadState(AgentState):
+    research: NotRequired[dict | None]  # Server-owned JSON ResearchState; whole-record replacement.
     sandbox: SandboxStateField
     thread_data: NotRequired[ThreadDataState | None]
     title: NotRequired[str | None]

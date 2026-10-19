@@ -71,6 +71,14 @@ async def test_create_persists_model_settings(_agent_env) -> None:
     assert fetched.reasoning_effort == "high"
 
 
+async def test_research_mode_round_trips_and_survives_unrelated_updates(_agent_env):
+    created = await create_agent_endpoint(AgentCreateRequest(name="competitor-research", research_enabled=True))
+    assert created.research_enabled is True
+    assert (await get_agent("competitor-research")).research_enabled is True
+    assert (await update_agent("competitor-research", AgentUpdateRequest(description="研究助手"))).research_enabled is True
+    assert (await update_agent("competitor-research", AgentUpdateRequest(research_enabled=False))).research_enabled is False
+
+
 async def test_create_rejects_unknown_model(_agent_env) -> None:
     with pytest.raises(HTTPException) as excinfo:
         await create_agent_endpoint(AgentCreateRequest(name="bad", model="ghost-model"))
