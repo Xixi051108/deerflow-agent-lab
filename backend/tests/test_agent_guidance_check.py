@@ -143,6 +143,14 @@ def test_repository_guidance_stays_below_hard_budgets_and_avoids_doc_indexes() -
         assert "Subsystem Index" not in text
 
 
+def test_repository_effective_guidance_chains_stay_below_hard_budgets() -> None:
+    files = {PurePosixPath(path): (REPO_ROOT / path).read_text(encoding="utf-8") for path in EXPECTED_GUIDANCE_PATHS}
+
+    errors = [finding for finding in checker.analyze(REPO_ROOT, files) if finding.severity == "error"]
+
+    assert not errors, "\n".join(f"{finding.path}: {finding.message}" for finding in errors)
+
+
 def test_local_guidance_files_contain_the_split_original_sections() -> None:
     expected_headings = {
         "backend/app/gateway/AGENTS.md": "### Gateway API (`app/gateway/`)",

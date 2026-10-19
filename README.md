@@ -1997,3 +1997,8 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 - **问题与解决：** 先用手机和笔记本合成样本复现模块及工具缺失，补齐完整关系校验与读写。后续复现来源保留标签进入模型请求、Windows junction 将研究目录指向沙箱两项问题；分别通过请求级标签中和、收紧当前研究目录边界修复并增加回归。磁盘失败、取消后晚完成的文件、范围变化、历史恢复和分支均不得错误推进当前结果。
 - **验证结果：** 定向组合 **210 passed**，含本块 66 个新用例；开发后默认离线全集共选中 17,428 项，**17,071 passed / 357 skipped / 0 failed**，收集阶段的重复跳过另行列明；严格 I/O **146 passed / 1 skipped**，全局 Ruff check／format 通过。开发前后结果、日志与分母口径见 [板块三测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_DATA_TEST_REPORT.md)。
 - **边界与下一步：** 引用结构合法不等于事实或当前价格已核实；本阶段没有运行真实模型研究、实现预算停止或交付报告／面板。下一块为候选发现与比较维度规划。接口、存储规则及复盘见 [研究数据说明](docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md)。
+
+### 远程指南检查修复（2026-10-19）
+
+- **问题与修改：** 推送后 agent-guidance 检出四条继承链超出 96 KiB 硬上限。将后端总指南的详细运行说明和基准规则原文移到 [开发约束说明](backend/docs/DEVELOPMENT_INVARIANTS.md)，总指南保留入口，新增真实仓库继承链预算回归。
+- **本地验证：** 指南检查 0 errors／4 warnings，最长链由 106,123 降为 96,278 字节；相关测试 13 passed，Ruff 通过。未调整阈值或豁免，实际红绿证据见 [修复报告](docs/learning/agent-testing-bootcamp/REGRESSION_FIX_REPORT.md)。

@@ -73,3 +73,36 @@ ruff format --check .
 - `final-blocking.log`、`final-shard-1.log`、`final-shard-2.log`、`frontend-check-host.log`：最终检查结果。
 
 日志中的环境准备错误、保护性中止和未执行检查均不计为通过。真实研究质量、运行预算停止、报告与研究面板仍属于后续板块。
+
+## 远程 agent-guidance 失败修复（2026-10-19）
+
+推送 `377b726` 后，GitHub 的后端／前端 lint 通过，agent-guidance 失败。按相同提交区间本地复现得到 **4 errors / 8 warnings**；截图中的 5 errors 还包含作业退出 1 的汇总注解，不代表五条指南超限。原测试只约束每个文件大小，没有约束真实仓库的继承链总大小；本轮新增 1 项真实仓库链路回归。
+
+| 测试用例 | 预期结果 | 实际结果 |
+| --- | --- | --- |
+| 原推送区间的指南检查 | 超过 98,304 字节硬上限应失败并指出继承链 | 复现退出 1；middleware 106,123、runtime 100,456、sandbox 99,512、subagents 99,142 字节，4 条 AG002 错误 |
+| 新增真实仓库继承链回归，修复前 | 检出逐文件合法但继承链超限 | 1 failed / 12 deselected，精确列出上述四条继承链 |
+| 迁移详细说明后的工作区检查 | 全部链低于硬上限，软警告如实保留 | 退出 0，28 份 AGENTS.md、0 errors / 4 warnings；最长链为 96,278 字节 |
+| 完整指南测试 | 单文件、继承链、历史预算及指南目录约定均通过 | 宿主正常临时目录 **13 passed**，1.72 秒 |
+| 内容保留与链接检查 | 移出的说明原文保留，链接可定位 | 运行机制及基准说明与原提交逐段相同，仅调整相对链接／标题；两份文档的本地链接均存在 |
+| 修改测试的 Ruff 与 diff | 无 lint、格式或空白错误 | Ruff check 通过，1 file already formatted；git diff --check 通过 |
+
+| 复现 | 红灯原因 | 怎么修改 | 修改后 | 日志 |
+| --- | --- | --- | --- | --- |
+| 原 CI 区间退出 1；新增仓库链测试失败 | 后端总指南的详细运行说明被所有子指南继承，新增研究说明使四条继承链增长并超硬上限；原仓库测试只查单文件 | 将运行机制与基准规则原文移入 backend/docs/DEVELOPMENT_INVARIANTS.md，总指南保留入口和关键约束；新增真实仓库链总预算测试；不改阈值、豁免或工作流 | 总指南由 30,622 降为 20,777 字节；最长链减少 9,845 字节；检查 0 errors，13 项测试通过 | ci-red.log、chain-red.log → worktree-green.log、tests-green-host.log |
+
+环境失败单列：首次完整指南测试在沙箱中为 **10 passed / 3 errors**，三项均在 pytest 正常临时目录创建阶段失败，尚未执行用例主体。保持相同测试并在宿主正常临时目录复跑得到上述 13 passed；不把准备失败计为通过。日志：tests-green.log → tests-green-host.log。
+
+日志目录：`.deer-flow/local-dev/agent-guidance-verification/`（本地忽略）。所有 Python 进程禁写字节码。实际命令：
+
+```text
+python -B scripts/check_agent_guidance.py --before 609e88c --after 377b726 --github-annotations
+python -B -m pytest tests/test_agent_guidance_check.py -k effective_guidance_chains -q --tb=short
+python -B scripts/check_agent_guidance.py --github-annotations
+python -B -m pytest tests/test_agent_guidance_check.py -q --tb=short
+python -B -m ruff check tests/test_agent_guidance_check.py
+python -B -m ruff format --check tests/test_agent_guidance_check.py
+git diff --check
+```
+
+检查脚本从仓库根运行，pytest／Ruff 从 backend 运行；使用既有 backend 虚拟环境。本轮没有修改业务代码、重跑默认离线全集或严格 I/O 全集；前述全集结果仍属于历史。远程 CI 状态需在推送本次修复后另行核对，本地通过不能代替远程作业结果。

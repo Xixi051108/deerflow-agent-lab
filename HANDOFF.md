@@ -16,6 +16,8 @@
 
 ### 最新停点：板块 3 数据与证据契约已实现，下一步板块 4 候选发现与比较维度规划
 
+仓库同步与 CI 跟进：板块二／三及回归修复的 77 个文件已提交并推送为 `377b726`。用户随后报告 agent-guidance 失败；按同一提交区间复现 4 条 AG002 继承链超限，前后端 lint 在截图中均通过。本轮将后端总指南的运行／基准细节原文移到 `backend/docs/DEVELOPMENT_INVARIANTS.md` 并保留指引，新增真实仓库继承链预算回归。工作区检查 0 errors／4 warnings、最长链 96,278 字节；宿主 13 项测试通过，Ruff 与内容保留／链接检查通过。沙箱三项临时目录准备错误已另列，不计通过。完整红绿表与命令见 REGRESSION_FIX_REPORT.md 末节，日志在 `.deer-flow/local-dev/agent-guidance-verification/`。本轮未改阈值、豁免、工作流或业务代码；提交后需核对远程 Actions，本地结果不等于远程已通过。继续沿用用户对仓库同步的明确授权。
+
 本轮按用户确认的整块计划实施，不再规划旧五阶段草案的“自动研究与交付”。新增 `research/data.py` 的开放品类产品／配置／维度／来源／事实／评价／推断／引用／缺口／冲突契约，以及 `research/storage.py` 的不可变 UTF-8 JSON 快照和分页读取。`record_research_data` / `read_research_data` 通过同一 `RESEARCH_TOOLS` 在 Gateway 原工厂及内嵌客户端注册，沿用范围准入和工具权限链。实际使用与限制见 `docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md`，完整证据见 `RESEARCH_DATA_TEST_REPORT.md`。
 
 `ThreadState.research.result` 只存归属／范围／数据版本、哈希、计数和最多三个产品预览；完整结果在当前用户线程根的 research 子目录，位于沙箱 user-data 外。限制为快照 2 MiB、索引 16 KiB、引用 4,000 字符、读取 16 KiB。整批校验成功并落盘后才返回 checkpoint 更新。文件成功但 checkpoint 未提交或异步调用被取消时，只留下未引用文件，不自动提升。
