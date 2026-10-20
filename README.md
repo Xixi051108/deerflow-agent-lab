@@ -2002,3 +2002,22 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 
 - **问题与修改：** 推送后 agent-guidance 检出四条继承链超出 96 KiB 硬上限。将后端总指南的详细运行说明和基准规则原文移到 [开发约束说明](backend/docs/DEVELOPMENT_INVARIANTS.md)，总指南保留入口，新增真实仓库继承链预算回归。
 - **本地验证：** 指南检查 0 errors／4 warnings，最长链由 106,123 降为 96,278 字节；相关测试 13 passed，Ruff 通过。未调整阈值或豁免，实际红绿证据见 [修复报告](docs/learning/agent-testing-bootcamp/REGRESSION_FIX_REPORT.md)。
+
+### 第四阶段：候选发现与比较维度规划（2026-10-20）
+
+- **做了什么：** 在原研究 Agent 中接入固定发现指引，保存候选／排除理由、配置、动态比较维度、发现来源与缺口；写入前校验合并后的数量、指定／排除名单、明确重复、来源归属及解释字段，旧快照保持可读。
+- **问题与解决：** 先复现确认 2 款却可保存 3 款的问题，再补代码约束。真实 DeepSeek 首轮虽然通过结构断言，理由仍出现错误电池容量、缺口捏造用户内存要求；补质量断言和证据指引后，又观察到详细引用反复修正失败。随后明确本阶段只保存规划集合，保留原数据契约、不通过放宽校验让模型过关。
+- **验证结果：** 研究相关定向 **269 passed**；开发后严格 I/O **148 passed／1 skipped**，全局 Ruff check／format 通过。最后一轮真实 DeepSeek 固定资料 **3 例通过**，手机保留两款全新机、笔记本保留一款并说明不足、指定名单不擅自补入其他对象。默认离线 **17,129 passed／357 skipped／2 failed**，两项与开发前同名的扩展／ACP 超时失败仍保留，不能声称全量绿。所有失败轮、用量及分母口径见 [本块测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_DISCOVERY_TEST_REPORT.md)。
+- **边界：** 模型为真实调用，搜索／页面为冻结合成资料；不据此宣称真实站点、当前价格、全品类质量或生产稳定性已验证。运行保护仅用于测试，业务预算、报告和研究面板仍待后续板块。接口、数据规则与复盘见 [候选发现说明](docs/learning/agent-testing-bootcamp/RESEARCH_DISCOVERY.md)。
+
+### 第四阶段两项回归失败修复（2026-10-20）
+
+- **问题与修复：** 扩展预算超时用事后时钟比较误判来源，改用超时上下文的实际触发状态，预算耗尽后跳过后继。ACP 原真实子进程用例在启动阶段抛出空文本 NotImplementedError，移除全局强制 Windows Selector 的启动覆盖，恢复 Python 原生事件循环。
+- **保留与验证：** 两个原失败测试及断言完整保留，新增确定性时钟边界回归；失败日志不覆盖。专项组合 **123 passed**，最新完整默认离线 **17,132 passed／357 skipped／0 failed**，严格 I/O **148 passed／1 skipped**，Ruff 通过；分母与红绿证据见 [测试报告第 7 节](docs/learning/agent-testing-bootcamp/RESEARCH_DISCOVERY_TEST_REPORT.md#7-两项失败的专项修复2026-10-20用户追加要求)。事件循环修复对新启动进程生效，本轮未重启现有 Gateway、重跑 DeepSeek 或提交推送。
+
+### 第五阶段：证据采集与价格观察（2026-10-20）
+
+- **做了什么：** 原研究Agent增加有界服务端采集与分段回读；保护采集元数据、已知观察和原引用；新增价格须有实际采集、观察时间和金额支持。区分历史、条件、二手、市场／时间不符与未知，所有评估仍要求语义复核。
+- **问题与修复：** 复现仅更新引用绕过、流式请求无总期限、单位诊断不明确等问题。真实DeepSeek还暴露错配置关联、条件／缺口数字错误和未保留原单位的隐式换算，分别补指引、质量断言或确定性校验，并保留失败轮。
+- **验证与边界：** 最后数值保护轮真实模型固定资料3例通过，严格I/O **150 passed／1 skipped**。公开入口取得文本，但商店提取主要是条款，未证明真实SKU当前价。最终离线、Ruff及故障恢复结果见 [测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_TEST_REPORT.md)；接口、非价格未绑定观察的兼容与语义边界见 [实现说明](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE.md)。未重启服务、提交推送或提前实现预算、报告与面板。
+- **真实电商追加验收：** 相同“小米15各配置京东报价”任务未通过；原搜索相关性不足，固定链接诊断又确认两个京东HTML中有价格但Readability提取遗漏。另有空壳及Reader 403，尚未修复；下一步先完成板块五缺陷修复与实测，详见 [实际验收报告](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)。

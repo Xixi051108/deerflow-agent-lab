@@ -144,6 +144,40 @@ async def test_budget_exhaustion_mid_hook_logs_a_warning_not_a_traceback(caplog)
 
 
 @pytest.mark.asyncio
+async def test_budget_timeout_with_early_timer_still_warns_and_skips_successors(monkeypatch, caplog):
+    # asyncio may run timers up to one clock-resolution interval early.
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "_clock_resolution", 1.0)
+    reached = []
+
+    class _Hang:
+        async def on_task_stop(self, app_store, task_store, info, outcome):
+            reached.append("hang")
+            await asyncio.sleep(0)
+            await asyncio.Event().wait()
+
+    class _Successor:
+        async def on_task_stop(self, app_store, task_store, info, outcome):
+            reached.append("successor")
+
+    with caplog.at_level(logging.WARNING, logger="deerflow.extensions.notify"):
+        await notify_task_stop(
+            _extensions(_Hang(), _Successor()),
+            ExtensionData("task-1"),
+            _info(),
+            TaskOutcome.COMPLETED,
+            timeout=0.02,
+        )
+
+    records = [record for record in caplog.records if record.name == "deerflow.extensions.notify"]
+    assert reached == ["hang"]
+    assert [record.levelno for record in records] == [logging.WARNING, logging.WARNING]
+    assert "timed out" in records[0].getMessage()
+    assert "skipped" in records[1].getMessage()
+    assert all(record.exc_info is None for record in records)
+
+
+@pytest.mark.asyncio
 async def test_contributor_timeout_error_before_budget_is_a_hook_failure(caplog):
     # A TimeoutError the contributor raises on its own is not budget
     # exhaustion; it stays classified as a hook failure.

@@ -91,7 +91,8 @@ Research data tools `record_research_data` / `read_research_data` share that gat
 and the original tool-policy chain. `research/data.py` validates the merged
 category-neutral result; `research/storage.py` stores immutable, hashed snapshots
 outside sandbox user-data, while checkpoint state holds only a bounded reference.
-Exact quote/relationship validation does not establish truth or current prices.
+`collect_research_source` adds bounded server captures and price provenance checks.
+Exact quotations and capture metadata still do not establish semantic truth.
 See root `docs/learning/agent-testing-bootcamp/RESEARCH_DATA.md` and its test report.
 
 ### Synthetic business-task diagnosis learning tools
@@ -240,6 +241,9 @@ markers with `os.name` for Windows collection.
 Native Windows regression prerequisites and platform-specific test boundaries
 are documented in `tests/AGENTS.md`. Backend Ruff excludes generated `.deer-flow`
 runtime content; its `skills_view` copies are not backend source files.
+
+Keep Python's native Windows event-loop default; a global Selector override
+disables real ACP/MCP subprocess spawning. Do not restore `sitecustomize.py` for it.
 
 Jina logging tests use dummy keys (`tests/test_jina_client.py`).
 Jina/Browserless/InfoQuest resolve URLs without rebuilding HTML.

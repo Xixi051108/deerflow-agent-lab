@@ -16,6 +16,7 @@ RESEARCH_TURN_KEY = "__deerflow_research_turn"
 PROPOSE_SCOPE_TOOL = "propose_research_scope"
 RECORD_DATA_TOOL = "record_research_data"
 READ_DATA_TOOL = "read_research_data"
+COLLECT_SOURCE_TOOL = "collect_research_source"
 
 
 class ResearchState(BaseModel):

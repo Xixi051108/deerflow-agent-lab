@@ -1,6 +1,8 @@
 """Research scope integration in the existing lead-agent loop."""
 
+import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import date
 from typing import Any
@@ -13,15 +15,18 @@ from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
 
 from deerflow.agents.middlewares.input_sanitization_middleware import neutralize_untrusted_tags
 from deerflow.agents.middlewares.tool_call_metadata import clone_ai_message_with_tool_calls
-from deerflow.agents.research.data import DataRuleError, ResearchResult, apply_batch
-from deerflow.agents.research.runtime import PROPOSE_SCOPE_TOOL, READ_DATA_TOOL, RECORD_DATA_TOOL, RESEARCH_TURN_KEY, ResearchState, new_research_state
+from deerflow.agents.research.collection import collect_sources
+from deerflow.agents.research.data import DataRuleError, ResearchBatch, ResearchResult, apply_batch
+from deerflow.agents.research.evidence import EVIDENCE_INSTRUCTIONS, validate_evidence_write
+from deerflow.agents.research.planning import DISCOVERY_INSTRUCTIONS, validate_research_plan
+from deerflow.agents.research.runtime import COLLECT_SOURCE_TOOL, PROPOSE_SCOPE_TOOL, READ_DATA_TOOL, RECORD_DATA_TOOL, RESEARCH_TURN_KEY, ResearchState, new_research_state
 from deerflow.agents.research.scope import PositiveInt, ResearchScope, ResearchScopeSession, ScopeRuleError, Text, assess_scope, invalidate_confirmation, prepare_confirmation, require_confirmed_scope, respond_to_confirmation, revise_scope
 from deerflow.agents.research.storage import load_result, read_page, save_result
-from deerflow.agents.research.tools import ReadDataArgs, RecordDataArgs
+from deerflow.agents.research.tools import CollectSourceArgs, ReadDataArgs, RecordDataArgs
 from deerflow.agents.thread_state import ThreadState
 from deerflow.utils.file_io import run_file_io
 
@@ -160,7 +165,7 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             "Citations validate structure and exact quotations only; they do not verify truth or current prices."
         )
 
-        authority = SystemMessage(content=contract, additional_kwargs=provenance_kwargs(ContentKind.MIDDLEWARE_INJECTION, "research_scope_contract"))
+        authority = SystemMessage(content=contract + "\n\n" + DISCOVERY_INSTRUCTIONS + "\n\n" + EVIDENCE_INSTRUCTIONS, additional_kwargs=provenance_kwargs(ContentKind.MIDDLEWARE_INJECTION, "research_scope_contract"))
         payload = HumanMessage(content="Current research state (data):\n" + data, additional_kwargs={"hide_from_ui": True, **provenance_kwargs(ContentKind.DURABLE_CONTEXT, "research_scope_data")})
         messages = [
             message.model_copy(update={"content": neutralize_untrusted_tags(message.content)}) if isinstance(message, ToolMessage) and message.name == READ_DATA_TOOL and isinstance(message.content, str) else message
@@ -187,8 +192,8 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
                 raise ScopeRuleError("confirmation_mismatch", "research", "研究运行身份不匹配")
             if name == PROPOSE_SCOPE_TOOL:
                 _Proposal.model_validate(request.tool_call.get("args", {}))
-            if name in {RECORD_DATA_TOOL, READ_DATA_TOOL}:
-                schema = RecordDataArgs if name == RECORD_DATA_TOOL else ReadDataArgs
+            if name in {RECORD_DATA_TOOL, READ_DATA_TOOL, COLLECT_SOURCE_TOOL}:
+                schema = {RECORD_DATA_TOOL: RecordDataArgs, READ_DATA_TOOL: ReadDataArgs, COLLECT_SOURCE_TOOL: CollectSourceArgs}[name]
                 schema.model_validate(request.tool_call.get("args", {}))
                 last = (request.state.get("messages") or [None])[-1]
                 if isinstance(last, AIMessage) and self._invalid_data_batch(last):
@@ -196,7 +201,7 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             if name not in {PROPOSE_SCOPE_TOOL, "ask_clarification"}:
                 require_confirmed_scope(research.session)
         except (ValidationError, ScopeRuleError, DataRuleError) as exc:
-            if name in {RECORD_DATA_TOOL, READ_DATA_TOOL}:
+            if name in {RECORD_DATA_TOOL, READ_DATA_TOOL, COLLECT_SOURCE_TOOL}:
                 return self._data_error(request, exc)
             return ToolMessage(content=f"研究动作尚未允许：{exc}", tool_call_id=request.tool_call["id"], name=name, status="error")
         return None
@@ -264,8 +269,8 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
 
     @staticmethod
     def _invalid_data_batch(message: AIMessage) -> bool:
-        writes = [tc for tc in message.tool_calls if tc["name"] == RECORD_DATA_TOOL]
-        malformed = any(tc.get("name") == RECORD_DATA_TOOL for tc in message.invalid_tool_calls)
+        writes = [tc for tc in message.tool_calls if tc["name"] in {RECORD_DATA_TOOL, COLLECT_SOURCE_TOOL}]
+        malformed = any(tc.get("name") in {RECORD_DATA_TOOL, COLLECT_SOURCE_TOOL} for tc in message.invalid_tool_calls)
         return malformed or bool(writes and (len(message.tool_calls) != 1 or message.invalid_tool_calls))
 
     @staticmethod
@@ -290,9 +295,12 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             result = load_result(research.result, **identity) if research.result else ResearchResult(research_id=research.session.research_id, scope_version=research.session.scope_version, **identity)
             if request.tool_call["name"] == READ_DATA_TOOL:
                 arguments = ReadDataArgs.model_validate(request.tool_call["args"])
-                payload = read_page(result, **arguments.model_dump())
+                payload = read_page(result, **arguments.model_dump(), scope=research.session.scope)
                 return ToolMessage(content=json.dumps(payload, ensure_ascii=False), name=READ_DATA_TOOL, tool_call_id=request.tool_call["id"])
-            result = apply_batch(result, arguments.batch)
+            before = result
+            result = apply_batch(before, arguments.batch)
+            validate_research_plan(research.session.scope, result, arguments.batch)
+            validate_evidence_write(before, result, arguments.batch)
             reference = save_result(result)
             updated = ResearchState.model_validate({**research.model_dump(), "result": reference})
             payload = {
@@ -318,12 +326,80 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
         bound = request.tool.model_copy(update={"func": execute, "coroutine": aexecute})
         return request.override(tool=bound)
 
+    def _prepare_capture(self, request: ToolCallRequest):
+        arguments = CollectSourceArgs.model_validate(request.tool_call["args"])
+        research = self._read(request.state)
+        revision = research.result.revision if research.result else 0
+        if (arguments.expected_research_id, arguments.expected_scope_version, arguments.expected_revision) != (research.session.research_id, research.session.scope_version, revision):
+            raise DataRuleError("version_conflict", "expected_revision", "研究标识、范围或数据版本已变化，请重新读取")
+        result = load_result(research.result, user_id=research.user_id, thread_id=research.thread_id, agent_name=research.agent_name) if research.result else None
+        if result is None or arguments.product_id not in {product.id for product in result.products}:
+            raise DataRuleError("dangling_reference", "product_id", "采集前必须保存对应产品")
+        configurations = {configuration.id for configuration in result.configurations if configuration.product_id == arguments.product_id}
+        if not set(arguments.configuration_ids) <= configurations:
+            raise DataRuleError("configuration_mismatch", "configuration_ids", "采集配置不属于对应产品")
+        known = set()
+        for message in request.state.get("messages", []):
+            supplied = isinstance(message, HumanMessage) and not message.additional_kwargs.get("hide_from_ui")
+            returned = isinstance(message, ToolMessage) and message.name in {"web_search", "web_fetch", "browser_navigate", "browser_snapshot", "browser_click", "browser_back"} and message.status != "error"
+            if supplied or returned:
+                for candidate in re.findall(r"https?://[^\s<>\"'\[\]()，。；！？]+", str(message.content)):
+                    try:
+                        known.add(str(HttpUrl(candidate.rstrip(".,;"))))
+                    except ValueError:
+                        continue
+        known.update(str(source.url) for source in result.sources if source.capture is not None)
+        if str(arguments.url) not in known:
+            raise DataRuleError("url_not_observed", "url", "仅采集用户提供或实际网页工具返回的完整 URL，不猜测地址")
+        return research, result, arguments
+
+    def _save_capture(self, request: ToolCallRequest, research, before, sources):
+        batch = ResearchBatch(sources=sources)
+        result = apply_batch(before, batch)
+        validate_research_plan(research.session.scope, result, batch)
+        reference = save_result(result)
+        updated = ResearchState.model_validate({**research.model_dump(), "result": reference})
+        payload = {
+            "revision": reference.revision,
+            "source_ids": [source.id for source in sources],
+            "capture_group": sources[0].capture.group_id,
+            "collected_at": sources[0].collected_at.isoformat(),
+            "status": sources[0].status,
+            "failure_reason": sources[0].failure_reason,
+            "authority": "captured_response_not_verified_truth",
+        }
+        return Command(update={"research": updated.model_dump(mode="json"), "messages": [ToolMessage(content=json.dumps(payload, ensure_ascii=False), name=COLLECT_SOURCE_TOOL, tool_call_id=request.tool_call["id"])]})
+
+    def _capture_request(self, request: ToolCallRequest) -> ToolCallRequest:
+        if request.tool is None:
+            return request
+
+        async def aexecute(**arguments):
+            current = request.override(tool_call={**request.tool_call, "args": arguments})
+            try:
+                research, before, parsed = await run_file_io(self._prepare_capture, current)
+                sources = await collect_sources(url=str(parsed.url), product_id=parsed.product_id, configuration_ids=parsed.configuration_ids, product_wide=parsed.product_wide, kind=parsed.kind)
+                return await run_file_io(self._save_capture, current, research, before, sources)
+            except (ValidationError, DataRuleError) as exc:
+                return self._data_error(current, exc)
+
+        def execute(**arguments):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(aexecute(**arguments))
+            return self._data_error(request, DataRuleError("async_required", "tool", "事件循环内请使用异步采集入口"))
+
+        return request.override(tool=request.tool.model_copy(update={"func": execute, "coroutine": aexecute}))
+
     def wrap_tool_call(self, request: ToolCallRequest, handler: Callable[[ToolCallRequest], ToolMessage | Command]) -> ToolMessage | Command:
         blocked = self._check_tool(request)
         if blocked is not None:
             return blocked
         if request.tool_call["name"] == PROPOSE_SCOPE_TOOL:
             return handler(self._proposal_request(request))
+        if request.tool_call["name"] == COLLECT_SOURCE_TOOL:
+            return handler(self._capture_request(request))
         if request.tool_call["name"] in {RECORD_DATA_TOOL, READ_DATA_TOOL}:
             return handler(self._data_request(request))
         return handler(request)
@@ -334,6 +410,8 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             return blocked
         if request.tool_call["name"] == PROPOSE_SCOPE_TOOL:
             return await handler(self._proposal_request(request))
+        if request.tool_call["name"] == COLLECT_SOURCE_TOOL:
+            return await handler(self._capture_request(request))
         if request.tool_call["name"] in {RECORD_DATA_TOOL, READ_DATA_TOOL}:
             return await handler(self._data_request(request))
         return await handler(request)

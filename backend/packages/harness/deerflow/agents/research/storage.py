@@ -9,6 +9,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from deerflow.agents.research.data import MAX_READ_BYTES, MAX_SNAPSHOT_BYTES, SECTIONS, DataRuleError, ResearchResult, ResultRef, Section
+from deerflow.agents.research.evidence import assess_claim_evidence
+from deerflow.agents.research.scope import ResearchScope
 from deerflow.config.paths import as_windows_extended_path, get_paths
 
 
@@ -86,7 +88,7 @@ def load_result(reference: ResultRef, *, user_id: str, thread_id: str, agent_nam
     return result
 
 
-def read_page(result: ResearchResult, section: Section, *, ids: list[str] | None = None, offset: int = 0, limit: int = 20) -> dict:
+def read_page(result: ResearchResult, section: Section, *, ids: list[str] | None = None, offset: int = 0, limit: int = 20, scope: ResearchScope | None = None) -> dict:
     if section not in SECTIONS or type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
         raise DataRuleError("invalid_page", "page", "集合、偏移或数量不合法（limit 1–100）")
     rows = getattr(result, section)
@@ -107,7 +109,10 @@ def read_page(result: ResearchResult, section: Section, *, ids: list[str] | None
         "authority": "unverified_research_data",
     }
     for row in rows[offset : offset + limit]:
-        proposed = [*page["records"], row.model_dump(mode="json")]
+        record = row.model_dump(mode="json")
+        if section == "claims" and scope is not None:
+            record["evidence_assessment"] = assess_claim_evidence(scope, result, row.id)
+        proposed = [*page["records"], record]
         next_offset = offset + len(proposed)
         candidate = {**page, "records": proposed, "next_offset": next_offset if next_offset < len(rows) else None}
         if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > MAX_READ_BYTES:

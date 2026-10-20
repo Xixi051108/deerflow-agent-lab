@@ -5,12 +5,15 @@ def sample_batch(category="phone"):
     laptop = category == "laptop"
     text = "合成评测：16GB 配置在固定亮度下续航 8 小时，重量 1.4 kg。" if laptop else "合成官方资料：256GB 配置重量 190 g。"
     return {
-        "products": [{"id": "product", "name": "合成笔记本" if laptop else "合成手机", "brand": "Synthetic", "model": "Demo"}],
+        "products": [{"id": "product", "name": "合成笔记本" if laptop else "合成手机", "brand": "Synthetic", "model": "Demo", "reason": "合成用途相关候选，价格仍待核实", "discovery_source_ids": ["source"]}],
         "configurations": [
             {"id": "base", "product_id": "product", "label": "16GB/512GB" if laptop else "8GB/256GB", "attributes": {"memory": "16GB" if laptop else "8GB", "storage": "512GB" if laptop else "256GB"}},
             {"id": "other", "product_id": "product", "label": "32GB/1TB" if laptop else "12GB/512GB", "attributes": {"memory": "32GB" if laptop else "12GB"}},
         ],
-        "dimensions": [{"id": "weight", "name": "重量", "unit": "kg" if laptop else "g", "basis": "整机重量"}, {"id": "price", "name": "价格", "kind": "price", "unit": "CNY", "basis": "全新单台"}],
+        "dimensions": [
+            {"id": "weight", "name": "重量", "unit": "kg" if laptop else "g", "basis": "整机重量", "description": "比较携带负担"},
+            {"id": "price", "name": "价格", "kind": "price", "unit": "CNY", "basis": "全新单台", "description": "核对购买条件"},
+        ],
         "sources": [
             {
                 "id": "source",

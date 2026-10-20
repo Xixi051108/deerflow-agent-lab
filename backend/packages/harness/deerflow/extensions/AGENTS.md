@@ -229,6 +229,9 @@ same start/stop pair. Outcomes are conservative (`completed`, `aborted`, or `fai
 contributors run in registration order within one bounded budget, and notification failures
 are logged and fail open.
 
+Classify budget exhaustion with `asyncio.Timeout.expired()`, not a later clock
+comparison: timers may fire early. Once expired, skip remaining contributors.
+
 Fail-open is decided by the *origin* of a failure, not by its base class, because
 `CancelledError` reaches a contributor's `except` for two unrelated reasons. Only a genuine
 cancellation of the host task increments `asyncio.Task.cancelling()`, so `_notify_each`

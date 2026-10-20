@@ -66,6 +66,8 @@ class Product(Record):
     model: Text | None = None
     disposition: Literal["candidate", "excluded"] = "candidate"
     reason: Text | None = None
+    scope_name: Text | None = None
+    discovery_source_ids: tuple[Id, ...] = ()
 
     @model_validator(mode="after")
     def exclusion_reason(self) -> Self:
@@ -90,6 +92,23 @@ class Dimension(Record):
     basis: Text
 
 
+class SourceCapture(Record):
+    """Server-authored capture position; proof of observation, not semantic truth."""
+
+    group_id: Id
+    segment_index: Revision
+    start_char: Revision
+    end_char: Revision
+    total_chars: Revision
+    truncation_reason: Text | None = None
+
+    @model_validator(mode="after")
+    def position(self) -> Self:
+        if not self.start_char <= self.end_char <= self.total_chars:
+            raise ValueError("采集片段位置不合法")
+        return self
+
+
 class Source(Record):
     id: Id
     url: HttpUrl
@@ -103,6 +122,7 @@ class Source(Record):
     configuration_ids: tuple[Id, ...] = ()
     product_wide: bool = Field(default=False, strict=True)
     failure_reason: Text | None = None
+    capture: SourceCapture | None = None
 
     @model_validator(mode="after")
     def applicability(self) -> Self:
@@ -112,6 +132,8 @@ class Source(Record):
             raise ValueError("来源配置不能重复")
         if self.status in {"failed", "unknown"} and self.failure_reason is None:
             raise ValueError("不可用来源需要原因")
+        if self.capture is not None and self.capture.end_char - self.capture.start_char != len(self.text or ""):
+            raise ValueError("采集片段长度与正文不一致")
         return self
 
 
@@ -138,6 +160,8 @@ class Claim(Record):
     missing_reason: Text | None = None
     basis_claim_ids: tuple[Id, ...] = ()
     price: Price | None = None
+    original_value: Scalar = None
+    original_unit: Text | None = None
 
     @model_validator(mode="after")
     def meaning(self) -> Self:
@@ -150,6 +174,10 @@ class Claim(Record):
                 raise ValueError("推断必须有值和依据")
         elif self.basis_claim_ids:
             raise ValueError("只有推断使用 basis_claim_ids")
+        if (self.original_value is None) != (self.original_unit is None) or (
+            self.original_value is not None and (not isinstance(self.original_value, Decimal) or not isinstance(self.value, Decimal) or self.unit is None or self.price is not None)
+        ):
+            raise ValueError("单位换算须保留原数值和单位，且只用于明确的非价格数值")
         return self
 
 
@@ -232,6 +260,14 @@ class ResearchResult(ResearchBatch):
             for config_id in source.configuration_ids:
                 if config_id not in configurations or configurations[config_id].product_id != source.product_id:
                     raise DataRuleError("configuration_mismatch", "sources", "来源配置不属于对应产品")
+        for product in self.products:
+            if len(set(product.discovery_source_ids)) != len(product.discovery_source_ids):
+                raise DataRuleError("duplicate_reference", "products", "发现来源标识不能重复")
+            for source_id in product.discovery_source_ids:
+                if source_id not in sources:
+                    raise DataRuleError("dangling_reference", "products", "候选的发现来源不存在")
+                if sources[source_id].product_id != product.id:
+                    raise DataRuleError("discovery_source_mismatch", "products", "发现来源不属于对应产品")
         supported = set()
         for citation in self.citations:
             if citation.claim_id not in claims or citation.source_id not in sources:
@@ -249,7 +285,7 @@ class ResearchResult(ResearchBatch):
             if claim.kind == "fact" and claim.value is not None and (dimensions[claim.dimension_id].kind == "price") != (claim.price is not None):
                 raise DataRuleError("invalid_price", "claims", "已知价格必须携带价格口径，其他维度不能携带价格")
             if claim.unit != dimensions[claim.dimension_id].unit:
-                raise DataRuleError("unit_mismatch", "claims", "事实与维度单位不一致，请明确另建口径")
+                raise DataRuleError("unit_mismatch", f"claims.{claim.id}.unit", f"事实单位须为维度 {claim.dimension_id} 的 {dimensions[claim.dimension_id].unit!r}；不同属性请另建维度，不改其他事实的单位")
             if claim.value is not None and claim.kind != "inference" and claim.id not in supported:
                 raise DataRuleError("missing_citation", "claims", "已知事实或评价必须引用来源")
             for basis_id in claim.basis_claim_ids:

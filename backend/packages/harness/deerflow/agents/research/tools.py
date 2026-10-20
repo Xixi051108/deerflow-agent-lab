@@ -1,7 +1,9 @@
 """Model proposals only; state transitions are owned by ResearchScopeMiddleware."""
 
+from typing import Literal, Self
+
 from langchain_core.tools import tool
-from pydantic import Field
+from pydantic import Field, HttpUrl, model_validator
 
 from deerflow.agents.research.data import Id, Record, ResearchBatch, Revision, Section
 from deerflow.agents.research.scope import PositiveInt, ResearchScope
@@ -33,12 +35,35 @@ class ReadDataArgs(Record):
     limit: int = Field(default=20, strict=True, ge=1, le=100)
 
 
+class CollectSourceArgs(Record):
+    url: HttpUrl
+    product_id: Id
+    configuration_ids: tuple[Id, ...] = ()
+    product_wide: bool = Field(default=False, strict=True)
+    kind: Literal["official", "review", "retailer", "user_review", "other"] = "other"
+    expected_research_id: Id
+    expected_scope_version: PositiveInt
+    expected_revision: Revision
+
+    @model_validator(mode="after")
+    def applicability(self) -> Self:
+        if self.product_wide == bool(self.configuration_ids) or len(set(self.configuration_ids)) != len(self.configuration_ids):
+            raise ValueError("采集须明确产品级或不重复的配置级适用范围")
+        if self.url.username or self.url.password:
+            raise ValueError("公开来源 URL 不能包含登录凭据")
+        return self
+
+
 @tool("record_research_data", args_schema=RecordDataArgs)
 def record_research_data(batch: ResearchBatch, expected_research_id: str, expected_scope_version: int, expected_revision: int) -> str:
     """Save a validated research batch after scope confirmation, as the only call in a batch.
 
     Use current research identity, scope version and result revision from context.
     Record concrete configurations, exact source quotations and explicit unknowns.
+    New/updated products need reason; discovered products need discovery_source_ids.
+    scope_name binds an original named/excluded scope entry, never invents consent.
+    New/updated dimensions need description (relevance) and basis (comparison conditions).
+    Candidate count and named/excluded boundaries are checked against confirmed scope.
     All records remain unverified observations; this tool does not establish truth.
     """
     return "Research data writes require the research middleware."
@@ -54,4 +79,17 @@ def read_research_data(section: Section, ids: list[str] | None = None, offset: i
     return "Research data reads require the research middleware."
 
 
-RESEARCH_TOOLS = (propose_research_scope, record_research_data, read_research_data)
+@tool("collect_research_source", args_schema=CollectSourceArgs)
+def collect_research_source(url: str, product_id: str, expected_research_id: str, expected_scope_version: int, expected_revision: int, configuration_ids: tuple[str, ...] = (), product_wide: bool = False, kind: str = "other") -> str:
+    """Capture and save an exact public URL supplied by the user or returned by web tools.
+
+    First save the product and applicable configurations. This is a state write:
+    call it ALONE, with current research/scope/revision. Server saves actual text,
+    capture time and failures; response gives source_ids and the new revision.
+    Read sources with read_research_data before extracting claims/citations.
+    Reader observation does not certify freshness, seller, configuration or truth.
+    """
+    return "Research source capture requires the research middleware."
+
+
+RESEARCH_TOOLS = (propose_research_scope, record_research_data, read_research_data, collect_research_source)
