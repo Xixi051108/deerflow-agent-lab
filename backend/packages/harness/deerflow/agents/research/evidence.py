@@ -137,6 +137,20 @@ Evidence collection after the provisional candidate/dimension plan (research mod
   public pages. Only use exact URLs supplied by the user or returned by web_search/web_fetch.
   A collect call is a state WRITE and must be the ONLY call in that tool batch; use the returned
   revision for the next write. Do not fetch pages before scope confirmation.
+- Prioritize the manufacturer's official product/specification pages and its official store for
+  the confirmed market. Search and inspect official sources before third-party retailers/reposts;
+  use those to supplement unavailable or incomplete official evidence and record the limitation.
+  Official list/launch/starting prices are not current configuration-specific offers, and an
+  overseas official site cannot substitute for the confirmed market. Keep each channel separate.
+- If Reader yields an empty shell, login screen or irrelevant footer, record that gap. When the
+  configured browser tools are available, navigate through their normal authorized calls, inspect
+  the rendered page, then use collect_research_source(method="browser") for that exact current URL.
+  This capture reads an already-open page; it does not navigate or perform a login. If login is
+  needed, tell the user to take Live control and sign in themselves, then Remember login in the
+  browser panel. Never request passwords, verification codes or cookies in chat or record them as
+  research. Stop for user action; after their next message, reconfirm the unchanged scope before
+  continuing, preserving existing evidence. Reuse saved sessions while the website accepts them;
+  an expired session requires user login again. Unavailable browser tools mean a gap, not a bypass.
 - Capture saves immutable source segments and actual server timestamps, including failures.
   Read returned source_ids through read_research_data; follow next_offset. Different segments of
   one capture/URL are NOT independent sources. Do not reconstruct, edit or mint capture metadata.

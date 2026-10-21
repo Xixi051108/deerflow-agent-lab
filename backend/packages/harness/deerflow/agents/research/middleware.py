@@ -366,6 +366,7 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             "collected_at": sources[0].collected_at.isoformat(),
             "status": sources[0].status,
             "failure_reason": sources[0].failure_reason,
+            "method": sources[0].capture.method,
             "authority": "captured_response_not_verified_truth",
         }
         return Command(update={"research": updated.model_dump(mode="json"), "messages": [ToolMessage(content=json.dumps(payload, ensure_ascii=False), name=COLLECT_SOURCE_TOOL, tool_call_id=request.tool_call["id"])]})
@@ -378,7 +379,9 @@ class ResearchScopeMiddleware(AgentMiddleware[ThreadState]):
             current = request.override(tool_call={**request.tool_call, "args": arguments})
             try:
                 research, before, parsed = await run_file_io(self._prepare_capture, current)
-                sources = await collect_sources(url=str(parsed.url), product_id=parsed.product_id, configuration_ids=parsed.configuration_ids, product_wide=parsed.product_wide, kind=parsed.kind)
+                sources = await collect_sources(
+                    url=str(parsed.url), product_id=parsed.product_id, configuration_ids=parsed.configuration_ids, product_wide=parsed.product_wide, kind=parsed.kind, method=parsed.method, thread_id=research.thread_id
+                )
                 return await run_file_io(self._save_capture, current, research, before, sources)
             except (ValidationError, DataRuleError) as exc:
                 return self._data_error(current, exc)

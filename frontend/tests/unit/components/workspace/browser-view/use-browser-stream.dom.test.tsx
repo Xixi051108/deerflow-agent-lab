@@ -17,7 +17,7 @@ class FakeWebSocket {
   binaryType = "";
   closeCalls = 0;
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((message: MessageEvent) => void) | null = null;
 
@@ -40,9 +40,9 @@ class FakeWebSocket {
     this.onopen?.();
   }
 
-  disconnect() {
+  disconnect(code?: number) {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.(code === undefined ? undefined : { code });
   }
 }
 
@@ -55,6 +55,22 @@ afterEach(() => {
 });
 
 describe("useBrowserStream", () => {
+  test("does not reconnect a revoked browser or retain its live frame", () => {
+    rs.useFakeTimers();
+    rs.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const { result } = renderHook(() => useBrowserStream("thread-1", true));
+    act(() => {
+      FakeWebSocket.instances[0]?.open();
+      FakeWebSocket.instances[0]?.disconnect(4410);
+      void rs.advanceTimersByTime(20000);
+    });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(result.current.loginStatus).toEqual({
+      remembered: false,
+      notice: "state_cleared",
+    });
+    expect(result.current.frameUrl).toBeNull();
+  });
   test("keeps a successfully reconnected socket instead of recreating it", async () => {
     rs.useFakeTimers();
     rs.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);

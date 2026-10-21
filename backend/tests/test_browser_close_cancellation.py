@@ -8,6 +8,7 @@ import pytest
 
 import deerflow.community.browser_automation.session as session_module
 from deerflow.community.browser_automation.session import BrowserSession, BrowserSessionManager
+from deerflow.runtime.user_context import get_effective_user_id
 
 
 class _ControllablePrivateLoop:
@@ -53,6 +54,7 @@ def _session(loop: _ControllablePrivateLoop) -> BrowserSession:
         headless=True,
         timeout_ms=1000,
         viewport={"width": 1000, "height": 500},
+        user_id=get_effective_user_id(),
     )
 
 

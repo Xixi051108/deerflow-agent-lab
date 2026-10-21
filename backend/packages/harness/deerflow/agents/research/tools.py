@@ -44,6 +44,7 @@ class CollectSourceArgs(Record):
     expected_research_id: Id
     expected_scope_version: PositiveInt
     expected_revision: Revision
+    method: Literal["reader", "browser"] = "reader"
 
     @model_validator(mode="after")
     def applicability(self) -> Self:
@@ -80,7 +81,9 @@ def read_research_data(section: Section, ids: list[str] | None = None, offset: i
 
 
 @tool("collect_research_source", args_schema=CollectSourceArgs)
-def collect_research_source(url: str, product_id: str, expected_research_id: str, expected_scope_version: int, expected_revision: int, configuration_ids: tuple[str, ...] = (), product_wide: bool = False, kind: str = "other") -> str:
+def collect_research_source(
+    url: str, product_id: str, expected_research_id: str, expected_scope_version: int, expected_revision: int, configuration_ids: tuple[str, ...] = (), product_wide: bool = False, kind: str = "other", method: str = "reader"
+) -> str:
     """Capture and save an exact public URL supplied by the user or returned by web tools.
 
     First save the product and applicable configurations. This is a state write:
@@ -88,6 +91,8 @@ def collect_research_source(url: str, product_id: str, expected_research_id: str
     capture time and failures; response gives source_ids and the new revision.
     Read sources with read_research_data before extracting claims/citations.
     Reader observation does not certify freshness, seller, configuration or truth.
+    method=browser captures the CURRENT matching page after an authorized browser
+    navigation or manual login; it does not navigate or bypass browser permissions.
     """
     return "Research source capture requires the research middleware."
 

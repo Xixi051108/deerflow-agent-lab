@@ -96,6 +96,7 @@ class SourceCapture(Record):
     """Server-authored capture position; proof of observation, not semantic truth."""
 
     group_id: Id
+    method: Literal["jina_reader", "browser_dom"] = "jina_reader"
     segment_index: Revision
     start_char: Revision
     end_char: Revision

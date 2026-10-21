@@ -30,6 +30,70 @@ def _user(user_id: str = "browser-user") -> SimpleNamespace:
     return SimpleNamespace(id=user_id)
 
 
+def test_remember_browser_login_uses_owned_server_browser_without_returning_secrets():
+    user = User(email="browser@example.com", password_hash="x", system_role="user")
+    app = make_authed_test_app(user_factory=lambda: user)
+    app.include_router(browser_router.router)
+    app.state.thread_store.get = AsyncMock(return_value={"thread_id": "thread-1", "user_id": str(user.id)})
+    session = MagicMock()
+    session.remember_login = AsyncMock()
+    lease = MagicMock()
+    lease.__enter__.return_value = session
+    manager = MagicMock()
+    manager.acquire_existing_session.return_value = lease
+    with patch.object(browser_router, "_browser_tools_enabled", return_value=True), patch("deerflow.community.browser_automation.get_browser_session_manager", return_value=manager):
+        response = TestClient(app).put("/api/threads/thread-1/browser/login-state")
+    assert response.status_code == 200
+    assert response.json() == {"saved": True}
+    session.remember_login.assert_awaited_once()
+
+
+def test_remember_without_live_browser_does_not_create_unguarded_session():
+    from deerflow.community.browser_automation.session import BrowserSessionManager
+
+    user = User(email="browser@example.com", password_hash="x", system_role="user")
+    app = make_authed_test_app(user_factory=lambda: user)
+    app.include_router(browser_router.router)
+    app.state.thread_store.get = AsyncMock(return_value={"thread_id": "thread-1", "user_id": str(user.id)})
+    manager = BrowserSessionManager()
+
+    async def run(coro):
+        return await coro
+
+    loop = MagicMock()
+    loop.run = run
+    with patch.object(manager, "_ensure_loop", return_value=loop), patch.object(browser_router, "_browser_tools_enabled", return_value=True), patch("deerflow.community.browser_automation.get_browser_session_manager", return_value=manager):
+        response = TestClient(app).put("/api/threads/thread-1/browser/login-state")
+    assert response.status_code == 409
+    assert manager.existing_session("thread-1") is None
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+@pytest.mark.parametrize("owner", [None, "other-user"])
+def test_login_state_routes_reject_non_owned_threads(method, owner):
+    user = User(email="browser@example.com", password_hash="x", system_role="user")
+    app = make_authed_test_app(user_factory=lambda: user)
+    app.include_router(browser_router.router)
+    app.state.thread_store.get = AsyncMock(return_value={"thread_id": "thread-1", "user_id": owner})
+    with patch("deerflow.community.browser_automation.get_browser_session_manager") as manager:
+        response = getattr(TestClient(app), method)("/api/threads/thread-1/browser/login-state")
+    assert response.status_code == 404
+    manager.assert_not_called()
+
+
+def test_forget_uses_only_authenticated_owner_and_returns_no_storage_data():
+    user = User(email="browser@example.com", password_hash="x", system_role="user")
+    app = make_authed_test_app(user_factory=lambda: user)
+    app.include_router(browser_router.router)
+    app.state.thread_store.get = AsyncMock(return_value={"thread_id": "thread-1", "user_id": str(user.id)})
+    manager = MagicMock()
+    manager.forget_logins = AsyncMock()
+    with patch("deerflow.community.browser_automation.get_browser_session_manager", return_value=manager):
+        response = TestClient(app).delete("/api/threads/thread-1/browser/login-state")
+    assert response.json() == {"saved": False}
+    manager.forget_logins.assert_awaited_once_with(str(user.id))
+
+
 def _browser_ws_app(thread_store=...):
     app = FastAPI()
     app.include_router(browser_router.router)

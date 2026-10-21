@@ -5,6 +5,8 @@ import {
   ArrowRightIcon,
   GlobeIcon,
   Loader2Icon,
+  LockKeyholeIcon,
+  LogOutIcon,
   MonitorIcon,
   RadioIcon,
   XIcon,
@@ -19,7 +21,11 @@ import { resolveArtifactURL } from "@/core/artifacts/utils";
 import { isIMEComposing } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 
-import { navigateBrowser } from "./api";
+import {
+  forgetBrowserLogin,
+  navigateBrowser,
+  rememberBrowserLogin,
+} from "./api";
 import { useMaybeBrowserView } from "./context";
 import { decideBrowserKeyInput } from "./keyboard";
 import { type BrowserInputEvent, useBrowserStream } from "./use-browser-stream";
@@ -40,6 +46,9 @@ export function BrowserViewPanel({
   const [urlInput, setUrlInput] = useState("");
   const [navigating, setNavigating] = useState(false);
   const [live, setLive] = useState(true);
+  const [loginAction, setLoginAction] = useState<"remember" | "forget" | null>(
+    null,
+  );
   const [lastLiveUrl, setLastLiveUrl] = useState<string | null>(null);
   const [liveFallback, setLiveFallback] = useState<{
     frameUrl: string;
@@ -57,13 +66,19 @@ export function BrowserViewPanel({
     },
     [],
   );
-  const { status, frameUrl, liveUrl, sendInput } = useBrowserStream(
-    threadId,
-    live,
-    streamSeedUrl,
-    handleNavRejected,
-  );
+  const { status, frameUrl, liveUrl, tabs, loginStatus, sendInput } =
+    useBrowserStream(threadId, live, streamSeedUrl, handleNavRejected);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const keyboardRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
+  const dragRef = useRef<{
+    x: number;
+    y: number;
+    nx: number;
+    ny: number;
+    dragging: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
   const surfaceRef = useRef<HTMLImageElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const staticScreenshotRef = useRef<string | null>(null);
@@ -190,6 +205,34 @@ export function BrowserViewPanel({
     }
   };
 
+  const handleLoginState = async (action: "remember" | "forget") => {
+    if (loginAction) return;
+    setLoginAction(action);
+    try {
+      if (action === "remember") {
+        await rememberBrowserLogin(threadId);
+        toast.success(
+          "Login state saved for your future browser sessions. Websites may ask you to sign in again when it expires.",
+        );
+      } else {
+        await forgetBrowserLogin(threadId);
+        setLive(false);
+        setLiveFallback(null);
+        toast.success(
+          "Saved website logins cleared. Open Live again to use a fresh browser.",
+        );
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not update saved website logins",
+      );
+    } finally {
+      setLoginAction(null);
+    }
+  };
+
   const normalizedPoint = useCallback(
     (
       clientX: number,
@@ -245,6 +288,26 @@ export function BrowserViewPanel({
   const displayUrl = live
     ? (frameUrl ?? liveFallback?.frameUrl ?? imageUrl)
     : (liveFallback?.frameUrl ?? imageUrl);
+
+  useEffect(() => {
+    const input = keyboardRef.current;
+    if (!input) return;
+    const start = () => {
+      composingRef.current = true;
+    };
+    const end = (event: CompositionEvent) => {
+      composingRef.current = false;
+      const text = event.data ?? input.value;
+      if (liveActive && text) sendInput({ type: "text", text });
+      input.value = "";
+    };
+    input.addEventListener("compositionstart", start);
+    input.addEventListener("compositionend", end);
+    return () => {
+      input.removeEventListener("compositionstart", start);
+      input.removeEventListener("compositionend", end);
+    };
+  }, [liveActive, sendInput]);
 
   // React registers onWheel as a passive listener, so preventDefault() there is
   // ignored and the wheel scrolls the host chat page. Bind a native, non-passive
@@ -316,6 +379,7 @@ export function BrowserViewPanel({
       )}
       tabIndex={live ? 0 : undefined}
       onKeyDown={(event) => {
+        if (event.target === keyboardRef.current) return;
         const target = event.target;
         const editableTarget =
           target instanceof HTMLInputElement ||
@@ -419,12 +483,112 @@ export function BrowserViewPanel({
           <XIcon />
         </Button>
       </header>
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        {tabs.length > 1 && (
+          <select
+            aria-label="Browser tab"
+            className="bg-background max-w-48 min-w-0 rounded border px-2 py-1 text-xs"
+            value={tabs.find((tab) => tab.active)?.index ?? 0}
+            onChange={(event) =>
+              sendInput({
+                type: "activate_tab",
+                index: Number(event.target.value),
+              })
+            }
+          >
+            {tabs.map((tab) => (
+              <option key={tab.index} value={tab.index}>
+                {tab.title || `Tab ${tab.index + 1}`}
+              </option>
+            ))}
+          </select>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={loginAction !== null || !live || status !== "open"}
+          onClick={() => void handleLoginState("remember")}
+        >
+          {loginAction === "remember" ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <LockKeyholeIcon className="size-3.5" />
+          )}
+          Remember login
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={loginAction !== null}
+          onClick={() => void handleLoginState("forget")}
+          title="Clear all saved website logins and close your active browser sessions"
+        >
+          <LogOutIcon className="size-3.5" />
+          Forget all logins
+        </Button>
+        <span className="text-muted-foreground text-xs" role="status">
+          {loginStatus?.notice === "login_required"
+            ? "Sign in manually in Live, then Remember login. Never send passwords or codes in chat."
+            : loginStatus?.notice === "state_changed"
+              ? "Saved login changed in another browser. Close this browser and reopen it before saving."
+              : loginStatus?.notice === "state_cleared"
+                ? "Browser session closed. Reopen Live to load saved logins or sign in again."
+                : loginStatus?.notice === "save_failed" ||
+                    loginStatus?.notice === "storage_unavailable"
+                  ? "Login could not be saved. Retry Remember login, or clear saved logins and sign in again."
+                  : loginStatus?.remembered
+                    ? "Saved login updates automatically while this browser is open."
+                    : "Sign in here, then Remember login to reuse it in your other chats."}
+        </span>
+      </div>
+      <textarea
+        ref={keyboardRef}
+        aria-label="Browser keyboard input"
+        className="sr-only"
+        autoComplete="off"
+        spellCheck={false}
+        onInput={(event) => {
+          if (composingRef.current || event.nativeEvent.isComposing) return;
+          const text = event.currentTarget.value;
+          if (liveActive && text) sendInput({ type: "text", text });
+          event.currentTarget.value = "";
+        }}
+        onPaste={(event) => {
+          event.preventDefault();
+          const text = event.clipboardData.getData("text/plain");
+          if (liveActive && text) sendInput({ type: "text", text });
+          event.currentTarget.value = "";
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (isIMEComposing(event)) return;
+          if (event.key.length === 1 && !event.metaKey && !event.ctrlKey)
+            return;
+          if (
+            (event.metaKey || event.ctrlKey) &&
+            event.key.toLowerCase() === "v"
+          )
+            return;
+          const input = decideBrowserKeyInput({
+            live: liveActive,
+            editableTarget: false,
+            composing: false,
+            key: event.key,
+            metaKey: event.metaKey,
+            ctrlKey: event.ctrlKey,
+          });
+          if (input) {
+            sendInput(input);
+            event.preventDefault();
+          }
+        }}
+      />
       <main className="relative flex min-h-0 grow flex-col overflow-hidden bg-neutral-950">
         <div
           ref={stageRef}
           className="relative min-h-0 grow bg-neutral-900"
           onMouseDown={() => {
-            panelRef.current?.focus({ preventScroll: true });
+            keyboardRef.current?.focus({ preventScroll: true });
           }}
         >
           {displayUrl ? (
@@ -434,7 +598,64 @@ export function BrowserViewPanel({
               src={displayUrl}
               alt={frame?.title ?? "Browser view"}
               draggable={false}
-              onClick={(event) => forwardMouse("click", event)}
+              onPointerDown={(event) => {
+                if (!liveActive || event.button !== 0) return;
+                const point = normalizedPoint(event.clientX, event.clientY);
+                if (point) {
+                  dragRef.current = {
+                    ...point,
+                    x: event.clientX,
+                    y: event.clientY,
+                    dragging: false,
+                  };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }
+              }}
+              onPointerMove={(event) => {
+                const drag = dragRef.current;
+                if (!drag) return;
+                const point = normalizedPoint(event.clientX, event.clientY, {
+                  fallbackToCenter: true,
+                });
+                if (!point) return;
+                if (
+                  !drag.dragging &&
+                  Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >=
+                    5
+                ) {
+                  drag.dragging = true;
+                  sendInput({ type: "down", nx: drag.nx, ny: drag.ny });
+                }
+                if (drag.dragging) sendInput({ type: "move", ...point });
+              }}
+              onPointerUp={(event) => {
+                const drag = dragRef.current;
+                if (drag?.dragging) {
+                  const point = normalizedPoint(event.clientX, event.clientY, {
+                    fallbackToCenter: true,
+                  });
+                  sendInput({
+                    type: "up",
+                    nx: point?.nx ?? drag.nx,
+                    ny: point?.ny ?? drag.ny,
+                  });
+                  suppressClickRef.current = true;
+                }
+                dragRef.current = null;
+              }}
+              onPointerCancel={() => {
+                const drag = dragRef.current;
+                if (drag?.dragging)
+                  sendInput({ type: "up", nx: drag.nx, ny: drag.ny });
+                dragRef.current = null;
+              }}
+              onClick={(event) => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+                }
+                forwardMouse("click", event);
+              }}
             />
           ) : (
             <ConversationEmptyState

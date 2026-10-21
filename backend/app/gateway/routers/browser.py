@@ -71,6 +71,50 @@ async def _browser_thread_owned_by(thread_store, thread_id: str, user_id: str) -
     return record is not None and record.get("user_id") == user_id
 
 
+@router.put("/threads/{thread_id}/browser/login-state")
+@require_permission("threads", "write", owner_check=True, require_existing=True)
+async def remember_browser_login(thread_id: ThreadId, request: Request) -> dict:
+    user_id = str(request.state.auth.user.id)
+    store = getattr(request.app.state, "thread_store", None)
+    if store is None or not await _browser_thread_owned_by(store, thread_id, user_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if not _browser_tools_enabled():
+        raise HTTPException(status_code=404, detail="Browser automation is not enabled")
+    from deerflow.community.browser_automation import get_browser_session_manager
+    from deerflow.community.browser_automation.login_state import BrowserLoginConflict
+
+    try:
+        with get_browser_session_manager().acquire_existing_session(thread_id) as session:
+            await session.remember_login()
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail="Thread not found") from exc
+    except BrowserLoginConflict as exc:
+        raise HTTPException(status_code=409, detail="Login state changed; reopen the browser before saving") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail="Open the isolated browser and complete login before saving") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Browser login state could not be saved") from exc
+    return {"saved": True}
+
+
+@router.delete("/threads/{thread_id}/browser/login-state")
+@require_permission("threads", "write", owner_check=True, require_existing=True)
+async def forget_browser_login(thread_id: ThreadId, request: Request) -> dict:
+    user_id = str(request.state.auth.user.id)
+    store = getattr(request.app.state, "thread_store", None)
+    if store is None or not await _browser_thread_owned_by(store, thread_id, user_id):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    from deerflow.community.browser_automation import get_browser_session_manager
+
+    try:
+        await get_browser_session_manager().forget_logins(user_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail="Browser logins are already being cleared") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Saved browser logins could not be cleared") from exc
+    return {"saved": False}
+
+
 @router.post(
     "/threads/{thread_id}/browser/navigate",
     response_model=BrowserNavigateResponse,
@@ -364,14 +408,27 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
         # Avoid screenshotting here, because opening a Live panel already primes a
         # frame and GitHub-style SPAs can generate many URL/render transitions.
         last_url: str | None = None
+        last_login_status: dict | None = None
         while True:
             await asyncio.sleep(1.0)
+            if session.is_closed is True:
+                await websocket.close(code=4410)
+                return
+            login_status = await session.login_status()
+            if login_status != last_login_status:
+                await _send_payload({"type": "login_status", **login_status})
+                last_login_status = login_status
+                await session.push_live_frame()
+            elif login_status["notice"] == "login_required":
+                # Keep QR/async login completion visible without persisting frames.
+                await session.push_live_frame()
             with contextlib.suppress(Exception):
                 url = await session.current_url()
                 if url and url != last_url:
                     last_url = url
                     await _send_payload({"type": "url", "url": url})
                     await _send_tabs()
+                    await session.push_live_frame()
 
     def _queue_input(event: dict) -> None:
         nonlocal pending_move, pending_wheel
@@ -448,7 +505,7 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
                 try:
                     await session.dispatch_input(event)
                 except Exception as exc:
-                    logger.warning("browser stream input failed: %s", exc)
+                    logger.warning("browser stream input failed (%s)", type(exc).__name__)
                 else:
                     # A location may have changed — resync the client's URL bar.
                     if event.get("type") in {"navigate", "back", "forward", "click", "activate_tab"}:
@@ -484,7 +541,7 @@ async def browser_stream(websocket: WebSocket, thread_id: ThreadId) -> None:
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        logger.exception("browser stream error: thread_id=%s err=%s", thread_id, exc)
+        logger.warning("browser stream error: thread_id=%s err_type=%s", thread_id, type(exc).__name__)
     finally:
         pump_task.cancel()
         if input_task is not None:

@@ -26,6 +26,9 @@ Windows so shutdown flushes persisted state.
 
 ## Research data verification
 
+Frozen research capture fixtures must freeze collection time as well as their
+scope's `as_of_date`; the real calendar must not change expected price assessment.
+
 `support/research_samples.py` contains synthetic phone/laptop records, never live
 price evidence. Data/storage tests exercise public contracts and real temporary
 files; graph/HTTP tests replace only the model boundary and inject filesystem

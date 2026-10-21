@@ -8,6 +8,30 @@ export interface BrowserNavigateResult {
   title: string;
 }
 
+async function updateBrowserLogin(
+  threadId: string,
+  method: "PUT" | "DELETE",
+): Promise<void> {
+  const response = await fetch(
+    `${getBackendBaseURL()}/api/threads/${encodeURIComponent(threadId)}/browser/login-state`,
+    { method },
+  );
+  if (!response.ok) {
+    await throwGatewayApiError(
+      response,
+      "Could not update saved website logins",
+    );
+  }
+}
+
+export function rememberBrowserLogin(threadId: string): Promise<void> {
+  return updateBrowserLogin(threadId, "PUT");
+}
+
+export function forgetBrowserLogin(threadId: string): Promise<void> {
+  return updateBrowserLogin(threadId, "DELETE");
+}
+
 export async function navigateBrowser(
   threadId: string,
   url: string,

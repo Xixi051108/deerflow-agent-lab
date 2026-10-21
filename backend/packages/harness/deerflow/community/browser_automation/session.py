@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Coroutine
@@ -26,6 +27,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import urlparse
 
+from deerflow.runtime.user_context import get_effective_user_id
+from deerflow.utils.file_io import await_drained, run_file_io
+
+from .login_state import BrowserLoginConflict, clear_login_state, load_login_state, save_login_state
+
 if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
@@ -33,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 ScreenshotType = Literal["png", "jpeg", "webp"]
+
 
 # Element roles/tags treated as interactive when building a page snapshot. The
 # model addresses elements by the ``data-df-ref`` index this snapshot stamps, so
@@ -65,7 +72,7 @@ _SNAPSHOT_JS = r"""
     const role = el.getAttribute("role") || "";
     const type = el.getAttribute("type") || "";
     let name = (el.getAttribute("aria-label") || el.getAttribute("name") ||
-      el.getAttribute("placeholder") || el.innerText || el.value || "").trim();
+      el.getAttribute("placeholder") || el.innerText || (type === "password" ? "Password" : "") || "").trim();
     if (name.length > 120) name = name.slice(0, 120) + "…";
     results.push({ ref, tag, role, type, name });
     if (results.length >= 200) break;
@@ -133,6 +140,7 @@ _LIVE_FRAME_JPEG_QUALITY = 85
 _MANUAL_LIVE_FRAME_MIN_INTERVAL_S = 0.75
 _LIVE_FRAME_INPUT_INTERVAL_S = 0.05
 _LIVE_FRAME_SETTLE_DELAYS_S = (0.8, 2.0)
+_LOGIN_SAVE_INTERVAL_S = 5.0
 
 # Bound per-thread Chromium accumulation on a long-running multi-user gateway.
 # Sessions unused past the idle timeout are lazily evicted on the next
@@ -185,7 +193,9 @@ def redact_browser_url(url: str) -> str:
     """Drop query/fragment so a blocked-URL log line can't leak tokens/PII."""
     try:
         parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if parsed.scheme not in {"http", "https"}:
+            return url.split("?", 1)[0].split("#", 1)[0]
+        return f"{parsed.scheme}://{parsed.netloc.rsplit('@', 1)[-1]}{parsed.path}"
     except Exception:
         return "<unparsable-url>"
 
@@ -215,7 +225,7 @@ class _PlaywrightLoopThread:
             try:
                 done.result()
             except Exception as exc:
-                logger.debug("browser background task failed: %s", exc)
+                logger.debug("browser background task failed (%s)", type(exc).__name__)
 
         future.add_done_callback(_log_failure)
         return future
@@ -277,11 +287,21 @@ class BrowserSession:
         cdp_url: str | None = None,
         url_guard: Callable[[str], str | None] | None = None,
         on_activity: Callable[[], None] | None = None,
+        user_id: str | None = None,
     ) -> None:
         self._loop = loop
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._viewport = viewport
+        self.user_id = user_id
+        self._login_revision: str | None = None
+        self._login_save_lock = asyncio.Lock()
+        self._remembered_login = False
+        self._saved_login: dict | None = None
+        self._login_save_task: asyncio.Task | None = None
+        self._closed = False
+        self._revoked = False
+        self._login_notice: str | None = None
         # Optional SSRF guard applied at the browser request boundary. It returns
         # an error string to block a URL (redirect/popup/subresource) or None to
         # allow it. The explicit navigate URL is screened by the caller, but
@@ -342,6 +362,10 @@ class BrowserSession:
         with self._activity_lock:
             return self._active_refs
 
+    @property
+    def is_closed(self) -> bool:
+        return self._closed or self._revoked
+
     def _pin(self) -> None:
         """Keep this session in the manager while a caller owns it."""
         with self._activity_lock:
@@ -363,11 +387,20 @@ class BrowserSession:
             self._unpin()
 
     async def _ensure_page(self) -> Page:
+        if self._closed or self._revoked:
+            raise RuntimeError("Browser session was closed; reopen the browser")
         if self._page is not None and not self._page.is_closed():
             return self._page
         async with self._ensure_page_lock:
+            if self._closed or self._revoked:
+                raise RuntimeError("Browser session was closed; reopen the browser")
             if self._page is not None and not self._page.is_closed():
                 return self._page
+            if self._context is not None and self._browser is not None and self._browser.is_connected():
+                remaining = [page for page in self._context.pages if not page.is_closed()]
+                if remaining:
+                    self._set_active_page(remaining[-1])
+                    return self._page
             from playwright.async_api import async_playwright
 
             if self._playwright is None:
@@ -399,14 +432,40 @@ class BrowserSession:
                 return self._page
 
             if self._browser is None or not self._browser.is_connected():
-                self._browser = await self._playwright.chromium.launch(headless=self._headless)
+                try:
+                    self._browser = await self._playwright.chromium.launch(headless=self._headless)
+                except Exception as exc:
+                    if os.name != "nt" or "Executable doesn't exist" not in str(exc):
+                        raise
+                    # A fresh isolated Chrome instance still uses our own context;
+                    # this does not attach to a person's existing browser profile.
+                    self._browser = await self._playwright.chromium.launch(channel="chrome", headless=self._headless)
             # device_scale_factor=2 renders screenshots at retina density so the
             # panel stays crisp when the image is scaled up to fill the view.
-            self._context = await self._browser.new_context(viewport=self._viewport, device_scale_factor=2)
+            if self._context is not None:
+                await self._checkpoint_login()
+                await self._context.close()
+            self._request_guard_bound = False
+            self._page_listener_bound = False
+            login = None
+            if self.user_id is not None:
+                try:
+                    self._login_revision, login = await run_file_io(load_login_state, self.user_id)
+                    if self._login_revision is not None and login is None:
+                        self._login_notice = "login_required"
+                except (OSError, ValueError):
+                    self._login_notice = "storage_unavailable"
+            self._remembered_login = login is not None
+            self._saved_login = login
+            options = {"storage_state": login} if login is not None else {}
+            self._context = await self._browser.new_context(viewport=self._viewport, device_scale_factor=2, service_workers="block", **options)
             self._context.set_default_timeout(self._timeout_ms)
             await self._install_request_guard()
             self._set_active_page(await self._context.new_page())
             self._bind_new_page_listener()
+            self._start_login_updates()
+            if self.is_closed:
+                raise RuntimeError("Browser session was closed; reopen the browser")
             return self._page
 
     def _set_active_page(self, page: Page) -> None:
@@ -469,9 +528,8 @@ class BrowserSession:
             with contextlib.suppress(Exception):
                 await route.continue_()
 
-        with contextlib.suppress(Exception):
-            await self._context.route("**/*", _route)
-            self._request_guard_bound = True
+        await self._context.route("**/*", _route)
+        self._request_guard_bound = True
 
     async def _rebind_screencast(self) -> None:
         if self._on_frame is not None:
@@ -481,7 +539,7 @@ class BrowserSession:
         try:
             await self._rebind_screencast()
         except Exception as exc:
-            logger.debug("browser live screencast rebind failed: %s", exc)
+            logger.debug("browser live screencast rebind failed (%s)", type(exc).__name__)
 
     async def _navigate(self, url: str) -> PageSnapshot:
         page = await self._ensure_page()
@@ -489,9 +547,12 @@ class BrowserSession:
         return await self._snapshot_impl(page)
 
     async def _snapshot_impl(self, page: Page) -> PageSnapshot:
+        await self._checkpoint_login()
+        if await self._needs_login(page):
+            return PageSnapshot(url=redact_browser_url(page.url), title="Sign in using Browser Live, then Remember login")
         data = await page.evaluate(_SNAPSHOT_JS)
         elements = [SnapshotElement(ref=int(e["ref"]), tag=e["tag"], role=e["role"], type=e["type"], name=e["name"]) for e in data["elements"]]
-        return PageSnapshot(url=data["url"], title=data["title"], elements=elements)
+        return PageSnapshot(url=redact_browser_url(data["url"]), title=data["title"], elements=elements)
 
     async def _snapshot(self) -> PageSnapshot:
         page = await self._ensure_page()
@@ -551,8 +612,22 @@ class BrowserSession:
 
     async def _get_text(self, max_chars: int) -> str:
         page = await self._ensure_page()
+        if await self._needs_login(page):
+            return "Sign in using Browser Live, then Remember login. Do not send credentials in chat."
         text = await page.inner_text("body")
         return text[:max_chars]
+
+    async def _capture_page(self, max_chars: int) -> dict:
+        if self._page is None or self._page.is_closed():
+            raise RuntimeError("Open the browser page before capturing it")
+        if await self._needs_login(self._page):
+            raise RuntimeError("Complete login in Browser Live before capturing research")
+        capture = await self._page.evaluate(
+            "limit => ({url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, limit)})",
+            max_chars,
+        )
+        capture["url"] = redact_browser_url(capture["url"])
+        return capture
 
     async def _screenshot_bytes(
         self,
@@ -561,6 +636,8 @@ class BrowserSession:
         quality: int | None,
     ) -> bytes:
         page = await self._ensure_page()
+        if await self._needs_login(page):
+            raise RuntimeError("Login screens are available only in Browser Live")
         if quality is None:
             return await page.screenshot(full_page=full_page, type=image_type)
         return await page.screenshot(full_page=full_page, type=image_type, quality=quality)
@@ -634,7 +711,7 @@ class BrowserSession:
     async def _current_url(self) -> str | None:
         page = await self._ensure_page()
         try:
-            return page.url
+            return redact_browser_url(page.url)
         except Exception:
             return None
 
@@ -650,7 +727,7 @@ class BrowserSession:
             except Exception:
                 title = ""
             try:
-                url = page.url
+                url = redact_browser_url(page.url)
             except Exception:
                 url = ""
             tabs.append(BrowserTab(index=index, url=url, title=title, active=page == self._page))
@@ -673,9 +750,24 @@ class BrowserSession:
             await self._rebind_screencast()
 
     async def _close(self) -> None:
+        self._closed = True
+        async with self._ensure_page_lock:
+            await self._close_impl()
+
+    async def _close_impl(self) -> None:
         try:
+            if self._login_save_task is not None:
+                self._login_save_task.cancel()
+                await asyncio.gather(self._login_save_task, return_exceptions=True)
+                self._login_save_task = None
+            await self._checkpoint_login()
             with contextlib.suppress(Exception):
                 await self._stop_screencast()
+            tasks = tuple(self._background_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             if self._connected_over_cdp:
                 # Attached to the user's real Chrome — never close their browser,
                 # context, or the tab we adopted. Just disconnect Playwright.
@@ -762,11 +854,11 @@ class BrowserSession:
                     y = max(0.0, min(1.0, float(ny))) * vh
                     await page.mouse.move(x, y)
                 except (TypeError, ValueError) as e:
-                    logger.debug("invalid browser wheel coordinates: %s", e)
+                    logger.debug("invalid browser wheel coordinates (%s)", type(e).__name__)
             try:
                 handled = bool(await page.evaluate(_WHEEL_SCROLL_JS, {"x": x, "y": y, "dx": dx, "dy": dy}))
             except Exception as e:
-                logger.debug("browser js scroll failed: %s", e)
+                logger.debug("browser js scroll failed (%s)", type(e).__name__)
                 handled = False
             if not handled:
                 await page.mouse.wheel(dx, dy)
@@ -777,7 +869,7 @@ class BrowserSession:
         elif etype == "text":
             text = event.get("text")
             if text:
-                await page.keyboard.type(text)
+                await page.keyboard.insert_text(text)
         elif etype == "navigate":
             url = event.get("url")
             if url:
@@ -794,6 +886,73 @@ class BrowserSession:
             self._schedule_input_live_frame()
 
     # Public API — each marshals onto the private loop.
+    async def _needs_login(self, page: Page) -> bool:
+        # A hint, never a claim that a site's authentication has been verified.
+        if not isinstance(page.url, str):
+            return False
+        return bool(re.search(r"/(?:login|signin|sign-in|passport)(?:[/;.]|$)", urlparse(page.url).path, re.I)) or bool(await page.locator("input[type=password]:visible").count())
+
+    async def _login_status(self) -> dict:
+        notice = self._login_notice
+        if self._page is not None and not self._page.is_closed() and await self._needs_login(self._page):
+            notice = "login_required"
+        return {"remembered": self._remembered_login, "notice": notice}
+
+    async def login_status(self) -> dict:
+        return await self._loop.run(self._login_status())
+
+    def _start_login_updates(self) -> None:
+        if self._remembered_login and not self._closed and self._login_save_task is None:
+            self._login_save_task = asyncio.create_task(self._update_login_periodically())
+
+    async def _update_login_periodically(self) -> None:
+        while self._remembered_login and not self._closed and not self._revoked:
+            await asyncio.sleep(_LOGIN_SAVE_INTERVAL_S)
+            await self._checkpoint_login()
+
+    async def _checkpoint_login(self) -> None:
+        if not self._remembered_login or self._context is None or self._revoked:
+            return
+        try:
+            await self._remember_login(force=False)
+        except BrowserLoginConflict:
+            self._remembered_login = False
+            self._login_notice = "state_changed"
+            self._revoked = True
+        except Exception as exc:
+            # Playwright exceptions can contain URLs or page data. Never log them.
+            logger.warning("Browser login update failed (%s)", type(exc).__name__)
+            self._login_notice = "save_failed"
+
+    async def _remember_login(self, *, force: bool = True) -> None:
+        if self._context is None or self.user_id is None or self._connected_over_cdp or self._revoked:
+            raise RuntimeError("Open an isolated browser before saving its login state")
+        if force and self._page is not None and await self._needs_login(self._page):
+            raise RuntimeError("Complete login in Browser Live before saving")
+        async with self._login_save_lock:
+            state = await self._context.storage_state(indexed_db=True)
+            if self._revoked:
+                raise BrowserLoginConflict("Browser login state was cleared")
+            if not force and state == self._saved_login:
+                return
+
+            async def persist() -> None:
+                try:
+                    self._login_revision = await run_file_io(save_login_state, self.user_id, state, expected_revision=self._login_revision)
+                except BrowserLoginConflict:
+                    self._revoked = True
+                    raise
+                self._saved_login = state
+                self._remembered_login = True
+                self._login_notice = None
+
+            await await_drained(persist())
+            self._start_login_updates()
+
+    async def remember_login(self) -> None:
+        with self._activity():
+            await self._loop.run(self._remember_login())
+
     async def navigate(self, url: str) -> PageSnapshot:
         with self._activity():
             return await self._loop.run(self._navigate(url))
@@ -813,6 +972,10 @@ class BrowserSession:
     async def get_text(self, max_chars: int = 8000) -> str:
         with self._activity():
             return await self._loop.run(self._get_text(max_chars))
+
+    async def capture_page(self, max_chars: int = 128 * 1024 + 1) -> dict:
+        with self._activity():
+            return await self._loop.run(self._capture_page(max_chars))
 
     async def screenshot_bytes(
         self,
@@ -896,6 +1059,7 @@ class BrowserSessionManager:
         self._max_sessions = max_sessions
         self._idle_timeout_s = idle_timeout_s
         self._lock = threading.Lock()
+        self._clearing_users: set[str] = set()
 
     def _touch_session(self, key: str) -> None:
         with self._lock:
@@ -906,6 +1070,16 @@ class BrowserSessionManager:
         if self._loop is None:
             self._loop = _PlaywrightLoopThread()
         return self._loop
+
+    def existing_session(self, thread_id: str | None) -> BrowserSession | None:
+        ensure_browser_worker_compatibility()
+        with self._lock:
+            session = self._sessions.get(thread_id or "default")
+            if session is not None and session.user_id != get_effective_user_id():
+                raise PermissionError("Browser session belongs to another user")
+            if session is not None and session.is_closed:
+                return None
+            return session
 
     def get_session(
         self,
@@ -926,7 +1100,15 @@ class BrowserSessionManager:
         now = time.monotonic()
         evicted: list[BrowserSession] = []
         with self._lock:
+            if get_effective_user_id() in self._clearing_users:
+                raise RuntimeError("Browser logins are being cleared; reopen the browser")
             session = self._sessions.get(key)
+            if session is not None and session.user_id != get_effective_user_id():
+                raise PermissionError("Browser session belongs to another user")
+            if session is not None and session.is_closed:
+                evicted.append(self._sessions.pop(key))
+                self._last_used.pop(key, None)
+                session = None
             if session is None:
                 evicted.extend(self._collect_idle_locked(keep_key=key, now=now))
                 if self._max_sessions > 0 and len(self._sessions) >= self._max_sessions:
@@ -942,6 +1124,7 @@ class BrowserSessionManager:
                     cdp_url=cdp_url,
                     url_guard=url_guard,
                     on_activity=lambda: self._touch_session(key),
+                    user_id=get_effective_user_id(),
                 )
                 self._sessions[key] = session
             if pin:
@@ -953,14 +1136,31 @@ class BrowserSessionManager:
         return session
 
     @contextlib.contextmanager
-    def acquire_session(self, thread_id: str | None, **kwargs: Any):
-        """Acquire an atomically pinned session for one browser operation."""
+    def acquire_existing_session(self, thread_id: str | None):
+        """Pin an owned browser without creating one with default launch policy."""
+        ensure_browser_worker_compatibility()
         key = thread_id or "default"
-        session = self.get_session(key, pin=True, **kwargs)
+        with self._lock:
+            session = self._sessions.get(key)
+            if session is None or session.is_closed:
+                raise RuntimeError("Open the isolated browser before saving")
+            if session.user_id != get_effective_user_id():
+                raise PermissionError("Browser session belongs to another user")
+            session._pin()
+            self._last_used[key] = time.monotonic()
         try:
             yield session
         finally:
-            self.release_session(key, session)
+            self.release_session(thread_id, session)
+
+    @contextlib.contextmanager
+    def acquire_session(self, thread_id: str | None, **kwargs: Any):
+        """Acquire an atomically pinned session for one browser operation."""
+        session = self.get_session(thread_id, pin=True, **kwargs)
+        try:
+            yield session
+        finally:
+            self.release_session(thread_id, session)
 
     def release_session(self, thread_id: str | None, session: BrowserSession) -> None:
         """Release a lease and restore idle/LRU bounds when it becomes evictable."""
@@ -1027,12 +1227,46 @@ class BrowserSessionManager:
     async def close_session(self, thread_id: str | None) -> bool:
         key = thread_id or "default"
         with self._lock:
+            existing = self._sessions.get(key)
+            if existing is not None and existing.user_id != get_effective_user_id():
+                raise PermissionError("Browser session belongs to another user")
             session = self._sessions.pop(key, None)
             self._last_used.pop(key, None)
         if session is None:
             return False
         await session.close()
         return True
+
+    async def close_user_sessions(self, user_id: str) -> None:
+        with self._lock:
+            owned = [key for key, session in self._sessions.items() if session.user_id == user_id]
+            sessions = [self._sessions.pop(key) for key in owned]
+            for session in sessions:
+                session._revoked = True
+            for key in owned:
+                self._last_used.pop(key, None)
+        if sessions:
+            await asyncio.gather(*(session.close() for session in sessions))
+
+    async def forget_logins(self, user_id: str) -> None:
+        with self._lock:
+            if user_id in self._clearing_users:
+                raise RuntimeError("Browser logins are already being cleared")
+            self._clearing_users.add(user_id)
+            sessions = [session for session in self._sessions.values() if session.user_id == user_id]
+            for session in sessions:
+                session._revoked = True
+
+        async def clear() -> None:
+            try:
+                await run_file_io(clear_login_state, user_id)
+                await self.close_user_sessions(user_id)
+            finally:
+                with self._lock:
+                    self._clearing_users.discard(user_id)
+
+        # A cancelled HTTP caller must not abandon a clear still running on disk.
+        await await_drained(clear())
 
     async def close_all_sessions(self) -> int:
         with self._lock:
@@ -1044,7 +1278,7 @@ class BrowserSessionManager:
             try:
                 close_future = asyncio.wrap_future(session._submit_close())
             except Exception as exc:
-                logger.debug("browser session close submission failed: %s", exc)
+                logger.debug("browser session close submission failed (%s)", type(exc).__name__)
                 continue
             close_future.add_done_callback(_consume_future_exception)
             close_futures.append(close_future)

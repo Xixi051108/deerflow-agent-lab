@@ -120,3 +120,42 @@ async def test_reader_total_deadline_covers_a_stream_that_never_finishes(monkeyp
     # The outer deadline prevents a broken implementation hanging the test.
     result = await asyncio.wait_for(JinaClient().crawl_bounded("https://example.com/page", timeout=0.01), 1)
     assert result.error == "request_timeout" and stream.closed
+
+
+@pytest.mark.asyncio
+async def test_capture_keeps_official_purchase_details_outside_article(monkeypatch):
+    from deerflow.agents.research.collection import collect_sources
+
+    html = (
+        "<html><head><title>极光 A1 官方商城</title></head><body><article>" + "<p>用户体验分享：这台手机使用流畅，拍摄体验很好，屏幕清晰。</p>" * 40 + "</article><aside><h1>极光 A1</h1><div>12GB+256GB 黑色</div>"
+        "<div>商品标价 3099.00 元</div><p>登录查看到手价，优惠资格待核对。</p>"
+        "<a href='/specs'>官方参数</a></aside></body></html>"
+    )
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html)), **kwargs))
+    sources = await collect_sources(url="https://example.com/buy", product_id="p", configuration_ids=("c1",), kind="official")
+    text = "".join(source.text or "" for source in sources)
+    assert "12GB+256GB 黑色" in text
+    assert "商品标价 3099.00 元" in text
+    assert "登录查看到手价，优惠资格待核对。" in text
+    assert "https://example.com/specs" in text
+
+
+@pytest.mark.asyncio
+async def test_browser_capture_reads_the_existing_page_without_navigating(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from deerflow.agents.research.collection import collect_sources
+
+    session = MagicMock()
+    session.capture_page = AsyncMock(return_value={"url": "https://example.com/buy", "title": "官方商城", "text": "极光 A1 12GB+256GB 商品标价3099.00元，登录查看到手价。"})
+    manager = MagicMock()
+    manager.existing_session.return_value = session
+    monkeypatch.setattr("deerflow.community.browser_automation.get_browser_session_manager", lambda: manager)
+    monkeypatch.setattr("deerflow.agents.research.collection.get_app_config", lambda: SimpleNamespace(get_tool_config=lambda name: SimpleNamespace(model_extra={})))
+    sources = await collect_sources(url="https://example.com/buy", product_id="p", configuration_ids=("c1",), kind="official", method="browser", thread_id="t")
+    assert "商品标价3099.00元" in "".join(source.text or "" for source in sources)
+    assert sources[0].capture.method == "browser_dom"
+    manager.existing_session.assert_called_once_with("t")
+    session.navigate.assert_not_called()

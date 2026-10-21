@@ -43,6 +43,8 @@ tree if any switch step fails.
 
 ### Browser Progress Screenshots (`community/browser_automation/`)
 
+Browser login persistence: see [browser guide](community/browser_automation/AGENTS.md).
+
 Hidden per-action browser progress frames use JPEG at quality 80 to keep their
 storage and transfer cost bounded relative to lossless PNG. The explicit
 `browser_screenshot` tool remains PNG because it creates a user-requested

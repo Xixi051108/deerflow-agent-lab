@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -18,6 +19,14 @@ PAGE = "<html><head><title>合成商城</title></head><body><article><p>极光 A
 
 @pytest.fixture
 def frozen_reader(monkeypatch):
+    class CaptureClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            instant = cls(2026, 10, 20, 12, tzinfo=UTC)
+            return instant.astimezone(tz) if tz is not None else instant.replace(tzinfo=None)
+
+    # Freeze capture time along with the synthetic scope's as_of_date.
+    monkeypatch.setattr("deerflow.agents.research.collection.datetime", CaptureClock)
     requests = []
     original = httpx.AsyncClient
 

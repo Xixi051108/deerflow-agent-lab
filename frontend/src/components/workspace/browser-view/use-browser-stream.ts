@@ -33,6 +33,17 @@ export type BrowserInputEvent =
 
 export type BrowserStreamStatus = "idle" | "connecting" | "open" | "closed";
 
+export interface BrowserLoginStatus {
+  remembered: boolean;
+  notice:
+    | "login_required"
+    | "state_changed"
+    | "save_failed"
+    | "storage_unavailable"
+    | "state_cleared"
+    | null;
+}
+
 const RECONNECT_BASE_DELAY_MS = 800;
 const RECONNECT_MAX_DELAY_MS = 10_000;
 const RECONNECT_MAX_ATTEMPTS = 6;
@@ -71,6 +82,9 @@ export function useBrowserStream(
   );
   const [liveUrl, setLiveUrl] = useState<string | null>(null);
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
+  const [loginStatus, setLoginStatus] = useState<BrowserLoginStatus | null>(
+    null,
+  );
   // This state is only a lifecycle-generation signal. The actual consecutive
   // reconnect count lives in a ref so resetting it after a successful open
   // does not recreate the WebSocket effect.
@@ -117,6 +131,7 @@ export function useBrowserStream(
     frameBuffer.dispose();
     setLiveUrl(null);
     setTabs([]);
+    setLoginStatus(null);
     liveUrlRef.current = null;
   }, [enabled, frameBuffer, threadId]);
 
@@ -199,6 +214,8 @@ export function useBrowserStream(
           url?: string;
           message?: string;
           tabs?: BrowserTab[];
+          remembered?: boolean;
+          notice?: BrowserLoginStatus["notice"];
         };
         if (payload.type === "frame" && payload.data) {
           frameBuffer.replaceWithUrl(`data:image/jpeg;base64,${payload.data}`);
@@ -209,14 +226,30 @@ export function useBrowserStream(
           setTabs(payload.tabs);
         } else if (payload.type === "nav_rejected") {
           onNavRejectedRef.current?.(payload.url, payload.message);
+        } else if (
+          payload.type === "login_status" &&
+          typeof payload.remembered === "boolean"
+        ) {
+          setLoginStatus({
+            remembered: payload.remembered,
+            notice: payload.notice ?? null,
+          });
         }
       } catch (error) {
         console.warn("Ignoring malformed browser stream message", error);
       }
     };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (!closedByEffect) {
         setStatus("closed");
+        if ([4401, 4403, 4404, 4409, 4410].includes(event?.code)) {
+          frameBuffer.dispose();
+          setLiveUrl(null);
+          setTabs([]);
+          if (event.code === 4410)
+            setLoginStatus({ remembered: false, notice: "state_cleared" });
+          return;
+        }
         scheduleReconnect();
       }
     };
@@ -256,5 +289,5 @@ export function useBrowserStream(
     sendInput({ type: "navigate", url: target });
   }, [enabled, seedUrl, sendInput, status]);
 
-  return { status, frameUrl, liveUrl, tabs, sendInput };
+  return { status, frameUrl, liveUrl, tabs, loginStatus, sendInput };
 }

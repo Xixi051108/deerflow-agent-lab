@@ -1526,6 +1526,8 @@ Then uncomment the `group: browser` tool entries in `config.yaml` (`browser_navi
 
 Existing, non-mock Custom Agent chats expose the same Browser Live controls when browser control is available and the agent either leaves `tool_groups` unrestricted or includes the `browser` group. An explicit tool-group allowlist without `browser` keeps those controls hidden.
 
+For websites that require sign-in, take **Live** control and sign in manually, then click **Remember login** after the website finishes redirecting. DeerFlow saves that user's cookies, local storage and IndexedDB privately on the server and restores them in new chats and after a service restart. Changes are saved every five seconds and on browser snapshots/close; **Forget all logins** clears that user's saved state and closes their browsers. Login screens remain in Live and are excluded from model snapshots, research captures and saved screenshots. The panel supports popup/tab switching, pasted or composed text and pointer dragging; credentials should never be sent in chat. Keep one Gateway process per data directory, with `GATEWAY_WORKERS=1`. Website expiry/revocation can still require manual sign-in; sessionStorage, device-bound credentials and external CDP profiles are not persisted. See [browser login persistence](docs/learning/agent-testing-bootcamp/BROWSER_LOGIN_STATE.md) for activation, verification and limitations.
+
 The workspace Browser Live client negotiates binary JPEG WebSocket frames,
 keeps only the newest pending frame per display refresh, and revokes replaced
 object URLs. Gateway control messages remain JSON, and clients that do not
