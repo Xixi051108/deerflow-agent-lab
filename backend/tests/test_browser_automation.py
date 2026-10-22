@@ -514,6 +514,7 @@ async def test_click_tolerates_spa_navigation_without_load_event():
     first = MagicMock()
     first.scroll_into_view_if_needed = AsyncMock()
     first.click = AsyncMock()
+    first.get_attribute = AsyncMock(return_value=None)
     locator = MagicMock()
     locator.count = AsyncMock(return_value=1)
     locator.first = first

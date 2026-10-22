@@ -24,11 +24,77 @@ class _InlineLoop:
         return result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("login_page", [False, True])
+async def test_click_snapshots_the_new_active_popup_instead_of_old_page(login_home, login_page):
+    from deerflow.community.browser_automation.session import BrowserSession
+
+    session = BrowserSession(_InlineLoop(), user_id="alice", headless=True, timeout_ms=5000, viewport={"width": 800, "height": 600})
+    destination = "https://example.com/login?code=synthetic-callback" if login_page else "https://example.com/buy"
+    try:
+        page = await session._ensure_page()
+
+        async def respond(route):
+            if route.request.url == "https://example.com/start":
+                html = f'<title>Product overview</title><a target="_blank" href="{destination}">Buy</a>'
+            else:
+                html = "<title>Purchase options</title><button>12GB+512GB</button>"
+                if login_page:
+                    html = '<title>Private login</title><input type="password"><button>Private login action</button>'
+            await route.fulfill(content_type="text/html; charset=utf-8", body=html)
+
+        await page.route("https://example.com/**", respond)
+        # A popup's initial request must be routed at context level.
+        await session._context.route("https://example.com/**", respond)
+        before = await session.navigate("https://example.com/start")
+        clicked = await session.click(next(element.ref for element in before.elements if element.name == "Buy"))
+        assert clicked.url == destination.split("?", 1)[0]
+        if login_page:
+            assert "Sign in using Browser Live" in clicked.title and not clicked.elements
+            assert "synthetic-callback" not in str(clicked)
+        else:
+            assert clicked.title == "Purchase options"
+            option = next(element for element in clicked.elements if element.name == "12GB+512GB")
+            assert (await session.click(option.ref)).title == "Purchase options"
+    finally:
+        await session.close()
+
+
 @pytest.fixture
 def login_home(tmp_path, monkeypatch):
     monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
     monkeypatch.setattr("deerflow.config.paths._paths", None)
     return tmp_path
+
+
+@pytest.mark.asyncio
+async def test_snapshot_waits_for_inflight_purchase_options_after_popup(login_home):
+    import asyncio
+
+    from deerflow.community.browser_automation.session import BrowserSession
+
+    session = BrowserSession(_InlineLoop(), user_id="alice", headless=True, timeout_ms=5000, viewport={"width": 800, "height": 600})
+    try:
+        await session._ensure_page()
+
+        async def respond(route):
+            if route.request.url.endswith("/options"):
+                await asyncio.sleep(0.4)
+                await route.fulfill(content_type="application/json", body='["12GB+512GB"]')
+            elif route.request.url.endswith("/start"):
+                await route.fulfill(content_type="text/html", body='<a target="_blank" href="https://example.com/buy">Buy</a>')
+            else:
+                await route.fulfill(
+                    content_type="text/html",
+                    body="<title>Purchase</title><main>Loading</main><script>fetch('/options').then(r=>r.json()).then(options=>document.querySelector('main').innerHTML='<button>'+options[0]+'</button>')</script>",
+                )
+
+        await session._context.route("https://example.com/**", respond)
+        before = await session.navigate("https://example.com/start")
+        clicked = await session.click(next(element.ref for element in before.elements if element.name == "Buy"))
+        assert any(element.name == "12GB+512GB" for element in clicked.elements)
+    finally:
+        await session.close()
 
 
 def test_expired_state_is_removed_and_old_writers_are_fenced(login_home, monkeypatch):

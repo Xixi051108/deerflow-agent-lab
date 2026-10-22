@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, rs, test } from "@rstest/core";
 import { act, cleanup, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 
 rs.mock("@/components/workspace/browser-view/api", () => ({
   browserStreamURL: (threadId: string) => `ws://example.test/${threadId}`,
@@ -55,10 +56,25 @@ afterEach(() => {
 });
 
 describe("useBrowserStream", () => {
-  test("does not reconnect a revoked browser or retain its live frame", () => {
+  test("does not open a discarded StrictMode mount's browser connection", async () => {
+    rs.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    const { result, unmount } = renderHook(
+      () => useBrowserStream("thread-1", true),
+      { wrapper: StrictMode },
+    );
+    await act(() => Promise.resolve());
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(FakeWebSocket.instances[0]?.closeCalls).toBe(0);
+    act(() => FakeWebSocket.instances[0]?.open());
+    expect(result.current.status).toBe("open");
+    unmount();
+    expect(FakeWebSocket.instances[0]?.closeCalls).toBe(1);
+  });
+  test("does not reconnect a revoked browser or retain its live frame", async () => {
     rs.useFakeTimers();
     rs.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     const { result } = renderHook(() => useBrowserStream("thread-1", true));
+    await act(() => Promise.resolve());
     act(() => {
       FakeWebSocket.instances[0]?.open();
       FakeWebSocket.instances[0]?.disconnect(4410);
@@ -76,6 +92,7 @@ describe("useBrowserStream", () => {
     rs.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
 
     renderHook(() => useBrowserStream("thread-1", true));
+    await act(() => Promise.resolve());
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     act(() => {
@@ -83,7 +100,7 @@ describe("useBrowserStream", () => {
       FakeWebSocket.instances[0]?.disconnect();
     });
 
-    act(() => {
+    await act(async () => {
       void rs.advanceTimersByTime(800);
     });
     expect(FakeWebSocket.instances).toHaveLength(2);
@@ -101,7 +118,7 @@ describe("useBrowserStream", () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(2);
 
-    act(() => {
+    await act(async () => {
       void rs.advanceTimersByTime(1);
     });
     expect(FakeWebSocket.instances).toHaveLength(3);

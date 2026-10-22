@@ -1,8 +1,52 @@
 # DeerFlow 学习与二次开发交接
 
-更新日期：2026-10-21。工作区：D:\deerflow-agent-lab。本文替换旧交接内容；旧文档中的“尚未安装依赖、尚未运行、Git 无提交”已过时。
+更新日期：2026-10-22。工作区：D:\deerflow-agent-lab。当前状态先看本节；下方各日期记录保留历史证据。
 
-## 2026-10-21 当前代码同步与下一步
+## 当前停点：第五阶段官网标价范围收尾
+
+用户本轮要求第五阶段收尾，沿用“只需官网各配置价格、地区缺货不用调查”的范围。已补两项最小修复：BrowserSession快照三秒有界networkidle等待；快照selected=true与采集正文Selected options (DOM)提示。研究指引明确每种观察（含库存）均须核对实际选中配置；不增加通用SKU推断器，不放宽完整商品URL比较或登录遮蔽。
+
+**真实模型四配置轮通过。** 已知官网购买链接辅助，计划/确认经原测试替身预置，真实DeepSeek自主执行第五阶段工具：15次完成模型、14次工具、54.2秒、271,749 tokens。四条list Claim分别绑定c1/c2/c3/c4，黑色3599／3899／4099／4599元，8条引用包含选中状态与主商品金额，实际采集时间一致，回读评估为historical_or_list_price。四张截图金额与版本高亮人工核对，颜色以独立DOM active记录核对。公开网页系列累计62次／989,403 tokens（非账单）。没有追加模型试跑。
+
+验收与原失败保留见[第11节](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md#11-2026-10-22第五阶段收尾官网四配置实模验证)。本轮156项后端专项、修改前后严格I/O各151 passed／1 skipped、前端19项、ESLint／TypeScript、独立原面板合成E2E 1项通过；完整Next代理E2E是10月21日证据，本轮未重跑。最终默认离线两分片原始17,198通过／356选中跳过／41失败；40项为测试PATH漏uv，修正为根.venv/Scripts并设置UV_NO_SYNC=1后相关完整文件219 passed／13 skipped；另1项子进程临时目录收集错误，原文件串行7 passed／4 skipped。41项失败逐节点补验通过，去重后17,239已通过／356选中跳过，不声称单轮全量全绿或已修复临时目录偶发根因。Ruff全量通过（1547文件），指南29份／0 errors／0 warnings。
+
+**下一步：** 第五阶段已按官网标价范围关闭，下一轮按MODULE_PLAN开始第六阶段整块任务书（研究编排、预算、异常收束），本轮不开发第六阶段。已知链接辅助成功不等于开放搜索发现通过，早轮116字符失败未稳定复现；任意站点、真实电商登录、结算和通用语义识别均未验收。第10节错绑配置失败不得回写为成功。
+
+第五阶段收尾基线为main／f63d78c；用户随后明确授权将本次代码、测试及文档提交推送到origin/main，提交结果以实际Git记录为准。AFC、运行锁、本地配置和运行数据不纳入提交。没有启动／重启项目服务、Docker或子Agent。新增测试保持在原snapshot/capture公共接口。测试使用backend/.venv与原生Windows事件循环，Python始终-B／PYTHONDONTWRITEBYTECODE=1。受限环境pytest临时目录错误已单列，正常本机运行；不恢复火绒删除内容、不关闭防护、不复制源码。真实配置与密钥保持原样，原账号库仍在backend工作目录，不迁移删除。
+
+## 历史：2026-10-21第五阶段官网标价交付
+
+**最新用户口径：只需返回官网各配置价格，地区缺货暂时不用管。** 不继续调查地区库存或补电商；本次官网价格信息已齐，真实模型自主链仍有失败，不进入第六阶段。HEAD仍为main／`f63d78c`，暂存区为空，未提交／推送。
+
+### 官网价格及证据
+
+沿产品页实际“立即购买”找到[官网购买页](https://www.mi.com/shop/buy/detail?product_id=20618)，不能再使用失效旧入口19248推断官网无商品。2026-10-21北京时间15:46，第二轮逐项选择黑色，页面标价：12GB+256GB **3599元**、12GB+512GB **3899元**、16GB+512GB **4099元**、16GB+1TB **4599元**。两轮8条观察及第二轮4张截图已核对，主商品价格与服务费分开，页面标注小米自营。来源／active状态／时间见[验收第9节](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)及`research-evidence-verification/phase5-official-configurations-1/2`、`phase5-official-audit.json`。缺货及登录提示保留原证据，按最新口径不阻塞标价交付；未核实登录后结算价。没有向真实用户研究注入结果。
+
+### 本轮完成与验证
+
+- **完整Next合成登录联调通过。** 原Hook在StrictMode创建多余WebSocket，回归先复现2个连接；延后一个微任务后只保留有效连接，原排队导航、撤销及重连行为仍通过。原`frontend/scripts/dev.mjs`及Next rewrites、合成Gateway／身份／线程、隔离Chrome的完整页面E2E **1 passed（19.2秒）**，产物`browser-login-verification/phase5-next-panel-11/`。面板输入登录、Remember、第二聊天恢复Cookie／localStorage／IndexedDB、Forget关闭两会话、重新Live要求登录均通过，恢复截图人工核对。此前独立面板1 passed及失败轮保留。这不验证生产JWT／CSRF或真实电商账号。
+- **采集修复沿用原架构。** Reader／DOM过滤明确导航和页脚，保留商品内部nav、购买侧栏和跨span金额；空提取／空标题、完整URL内部比较与脱敏均有回归。六秒有界渲染仍在原十秒外层期限内，等待后复查登录；冷加载曾仅116字符的历史仍未稳定复现，不能称所有动态页稳定。
+- **购买弹窗同步先红后绿。** 显式target=_blank点击等待有界popup事件、采用新活动页再取快照，登录页继续遮蔽及URL脱敏。两项真实隔离浏览器回归先失败，简单重读active page仍失败，事件同步后通过。原SPA mock仅补get_attribute，未删断言。无模型真实官网复核正确进入20618、选中c2黑色并采到3899元（UTC09:02:34），产物`phase5-popup-web-1/artifact.json`。任意延迟JavaScript弹窗仍需新快照。
+- **最终验证：** 后端相关组合**197 passed（76.75秒）**，严格I/O **151 passed／1 skipped（27.87秒）**；前端browser-view **19 passed**，完整ESLint／TypeScript最终退出0。后端全量Ruff check／format通过（1547文件），指南29份／0 errors／0 warnings。日志分别为`phase5-continue-targeted-2.log`、`phase5-continue-blocking.log`、`phase5-continue-frontend-browser-2.log`、`phase5-continue-frontend-check-2.log`。较早默认全集17,234 passed／362 skipped不覆盖本轮最终修复，各轮不叠加。
+
+### 模型失败与未完成项
+
+用户“继续”后预先明确新轮上限8次模型／12工具／90秒，仅测一个配置。`research-evidence-verification/phase5-real-selected-1/artifact.json`实际8次已完成调用、8次工具尝试、1次采集、25.42秒、112,842 tokens；第9次模型尝试在请求前拒绝，不能算已调用。累计**47次真实模型调用／717,654 tokens**（usage_metadata，非账单），停止追加。
+
+该轮点击购买返回旧快照、后续ref失效；直接导航后未完成c2选择，采集实际是c1。没有保存价格，但把c1缺货Claim `cl-stock-c2`绑定到c2，配置语义质量失败，保守保存6项缺口。首轮未知值附直接引用被invalid_citation拒绝。popup同步在此后修复，仅以无模型公开页复核，**没有新模型证据证明完整自主发现→选配置→采集→保存正确Claim成功**。不把官网价格资料齐全或合成通过当作该链通过；下一步若用户要求继续此链，先定明确次数／时间上限，按后端TDD最小修复，不直接重复付费试跑。
+
+### 授权、服务与勿重复的坑
+
+- 用户后续明确授权重启／启动及启用真实配置的原8项browser工具；仅此配置变化被授权，其他配置／密钥保持不变。指纹基线为`phase5-config-before.json`及`phase5-browser-enabled.json`，最终复核`phase5-continue-closeout.json`。不重复运行启用脚本。
+- 用户已亲自登录DeerFlow；原账号与聊天库在`backend/.deer-flow/data/deerflow.db`。忽略启动器`start_gateway.py`固定CWD为backend，DEER_FLOW_HOME仍根目录`.deer-flow`，不要改回根目录CWD或迁移／删除数据库。账号恢复使用原重置工具，未读临时凭据内容或代登录。
+- 当前3000／8001已恢复，Gateway单worker且已加载popup修复。健康／就绪200，匿名`/api/v1/auth/me`401；3105／8105无监听。实际端口PID以系统查询为准，`services.json`记录的是启动器PID。最终健康在`phase5-continue-service-final.json`。
+- Next项目级开发锁导致第二实例失败，自定义upgrade删除后仍失败；最终原dev脚本通过。测试轮1–10及静态检查失败全部保留。`phase5_next_panel.py`不会自动恢复前端，直接重跑必须安排恢复；创建PID不等于就绪。前端已恢复，不再中断。
+- 保留隔离Chrome、私网／metadata拒绝、无CDP、生产认证及单Gateway。遇真实网站登录交还用户现有Live面板，不用真实账号测试，不索取密码／验证码。
+- Python始终`-B`及`PYTHONDONTWRITEBYTECODE=1`；不复制整棵源码、不执行stable-tree、不恢复火绒删除的副本、不加白名单或关闭防护。无子Agent。原未跟踪`.extensions_config.json.lock`、`AFC/`未碰。
+
+实现：[RESEARCH_EVIDENCE.md](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE.md)；登录：[BROWSER_LOGIN_STATE.md](docs/learning/agent-testing-bootcamp/BROWSER_LOGIN_STATE.md)；最新验收：[第10节](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)。生产修改集中于collection、BrowserSession及use-browser-stream，相关测试和合成support入口均保留未提交。最终diff／文档链接检查见收尾审计；下方仅为历史。
+
+## 历史：2026-10-21 代码同步与下一步
 
 用户明确授权将当前代码提交推送到远端。本次提交包含登录态专项、已有官网正文提取与浏览器采集接线、相关测试及文档；排除实际配置、密钥、`.deer-flow`运行数据、运行锁和AFC参考副本。下方“登录态尚未提交／不再推送”是10月20日当时的约束，已被本次明确授权取代；后续任务仍不默认获得提交推送或重启服务的授权。
 

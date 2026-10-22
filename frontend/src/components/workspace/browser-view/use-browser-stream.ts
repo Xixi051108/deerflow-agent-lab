@@ -150,123 +150,130 @@ export function useBrowserStream(
     // "steer to seed" effect below does not fire a duplicate navigate right
     // after open (the server already aligns the page to the connect-time seed).
     liveUrlRef.current = seedRef.current ?? null;
-    const socket = new WebSocket(browserStreamURL(threadId, seedRef.current));
-    socket.binaryType = "blob";
-    socketRef.current = socket;
+    // StrictMode cleans up its probe mount before this microtask runs. Avoid
+    // opening a discarded viewer that can race the surviving viewer's startup.
+    void Promise.resolve().then(() => {
+      if (closedByEffect) return;
+      const socket = new WebSocket(browserStreamURL(threadId, seedRef.current));
+      socket.binaryType = "blob";
+      socketRef.current = socket;
 
-    const scheduleReconnect = () => {
-      if (closedByEffect || !enabled) {
-        return;
-      }
-      if (reconnectTimer !== null) {
-        return;
-      }
-      // Exponential backoff with a ceiling + attempt cap so a server that keeps
-      // rejecting the upgrade cannot pin the client in a tight reconnect loop.
-      const attempt = reconnectAttemptRef.current;
-      if (attempt >= RECONNECT_MAX_ATTEMPTS) {
-        return;
-      }
-      const delay = Math.min(
-        RECONNECT_BASE_DELAY_MS * 2 ** attempt,
-        RECONNECT_MAX_DELAY_MS,
-      );
-      reconnectTimer = window.setTimeout(() => {
-        reconnectAttemptRef.current += 1;
-        setReconnectGeneration((generation) => generation + 1);
-      }, delay);
-    };
-
-    socket.onopen = () => {
-      const pendingNavigate = pendingNavigateRef.current;
-      if (pendingNavigate) {
-        socket.send(JSON.stringify(pendingNavigate));
-        pendingNavigateRef.current = null;
-      }
-      // Reset the reconnect budget on a successful open. Without this the
-      // cumulative attempt counter never returns to 0 while the panel stays
-      // mounted, so after RECONNECT_MAX_ATTEMPTS total reconnects — even across
-      // many healthy connections — scheduleReconnect would bail forever and
-      // Live would go permanently dead until the panel is toggled off/on.
-      reconnectAttemptRef.current = 0;
-      setStatus("open");
-    };
-    socket.onmessage = (message) => {
-      try {
-        if (closedByEffect) return;
-        if (message.data instanceof Blob) {
-          frameBuffer.push(
-            message.data.type === "image/jpeg"
-              ? message.data
-              : new Blob([message.data], { type: "image/jpeg" }),
-          );
+      const scheduleReconnect = () => {
+        if (closedByEffect || !enabled) {
           return;
         }
-        if (message.data instanceof ArrayBuffer) {
-          frameBuffer.push(new Blob([message.data], { type: "image/jpeg" }));
+        if (reconnectTimer !== null) {
           return;
         }
-        if (typeof message.data !== "string") return;
+        // Exponential backoff with a ceiling + attempt cap so a server that keeps
+        // rejecting the upgrade cannot pin the client in a tight reconnect loop.
+        const attempt = reconnectAttemptRef.current;
+        if (attempt >= RECONNECT_MAX_ATTEMPTS) {
+          return;
+        }
+        const delay = Math.min(
+          RECONNECT_BASE_DELAY_MS * 2 ** attempt,
+          RECONNECT_MAX_DELAY_MS,
+        );
+        reconnectTimer = window.setTimeout(() => {
+          reconnectAttemptRef.current += 1;
+          setReconnectGeneration((generation) => generation + 1);
+        }, delay);
+      };
 
-        const payload = JSON.parse(message.data) as {
-          type?: string;
-          data?: string;
-          url?: string;
-          message?: string;
-          tabs?: BrowserTab[];
-          remembered?: boolean;
-          notice?: BrowserLoginStatus["notice"];
-        };
-        if (payload.type === "frame" && payload.data) {
-          frameBuffer.replaceWithUrl(`data:image/jpeg;base64,${payload.data}`);
-        } else if (payload.type === "url" && payload.url) {
-          liveUrlRef.current = payload.url;
-          setLiveUrl(payload.url);
-        } else if (payload.type === "tabs" && Array.isArray(payload.tabs)) {
-          setTabs(payload.tabs);
-        } else if (payload.type === "nav_rejected") {
-          onNavRejectedRef.current?.(payload.url, payload.message);
-        } else if (
-          payload.type === "login_status" &&
-          typeof payload.remembered === "boolean"
-        ) {
-          setLoginStatus({
-            remembered: payload.remembered,
-            notice: payload.notice ?? null,
-          });
+      socket.onopen = () => {
+        const pendingNavigate = pendingNavigateRef.current;
+        if (pendingNavigate) {
+          socket.send(JSON.stringify(pendingNavigate));
+          pendingNavigateRef.current = null;
         }
-      } catch (error) {
-        console.warn("Ignoring malformed browser stream message", error);
-      }
-    };
-    socket.onclose = (event) => {
-      if (!closedByEffect) {
-        setStatus("closed");
-        if ([4401, 4403, 4404, 4409, 4410].includes(event?.code)) {
-          frameBuffer.dispose();
-          setLiveUrl(null);
-          setTabs([]);
-          if (event.code === 4410)
-            setLoginStatus({ remembered: false, notice: "state_cleared" });
-          return;
+        // Reset the reconnect budget on a successful open. Without this the
+        // cumulative attempt counter never returns to 0 while the panel stays
+        // mounted, so after RECONNECT_MAX_ATTEMPTS total reconnects — even across
+        // many healthy connections — scheduleReconnect would bail forever and
+        // Live would go permanently dead until the panel is toggled off/on.
+        reconnectAttemptRef.current = 0;
+        setStatus("open");
+      };
+      socket.onmessage = (message) => {
+        try {
+          if (closedByEffect) return;
+          if (message.data instanceof Blob) {
+            frameBuffer.push(
+              message.data.type === "image/jpeg"
+                ? message.data
+                : new Blob([message.data], { type: "image/jpeg" }),
+            );
+            return;
+          }
+          if (message.data instanceof ArrayBuffer) {
+            frameBuffer.push(new Blob([message.data], { type: "image/jpeg" }));
+            return;
+          }
+          if (typeof message.data !== "string") return;
+
+          const payload = JSON.parse(message.data) as {
+            type?: string;
+            data?: string;
+            url?: string;
+            message?: string;
+            tabs?: BrowserTab[];
+            remembered?: boolean;
+            notice?: BrowserLoginStatus["notice"];
+          };
+          if (payload.type === "frame" && payload.data) {
+            frameBuffer.replaceWithUrl(
+              `data:image/jpeg;base64,${payload.data}`,
+            );
+          } else if (payload.type === "url" && payload.url) {
+            liveUrlRef.current = payload.url;
+            setLiveUrl(payload.url);
+          } else if (payload.type === "tabs" && Array.isArray(payload.tabs)) {
+            setTabs(payload.tabs);
+          } else if (payload.type === "nav_rejected") {
+            onNavRejectedRef.current?.(payload.url, payload.message);
+          } else if (
+            payload.type === "login_status" &&
+            typeof payload.remembered === "boolean"
+          ) {
+            setLoginStatus({
+              remembered: payload.remembered,
+              notice: payload.notice ?? null,
+            });
+          }
+        } catch (error) {
+          console.warn("Ignoring malformed browser stream message", error);
         }
-        scheduleReconnect();
-      }
-    };
-    socket.onerror = () => {
-      if (!closedByEffect) {
-        setStatus("closed");
-        scheduleReconnect();
-      }
-    };
+      };
+      socket.onclose = (event) => {
+        if (!closedByEffect) {
+          setStatus("closed");
+          if ([4401, 4403, 4404, 4409, 4410].includes(event?.code)) {
+            frameBuffer.dispose();
+            setLiveUrl(null);
+            setTabs([]);
+            if (event.code === 4410)
+              setLoginStatus({ remembered: false, notice: "state_cleared" });
+            return;
+          }
+          scheduleReconnect();
+        }
+      };
+      socket.onerror = () => {
+        if (!closedByEffect) {
+          setStatus("closed");
+          scheduleReconnect();
+        }
+      };
+    });
 
     return () => {
       closedByEffect = true;
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
       }
+      socketRef.current?.close();
       socketRef.current = null;
-      socket.close();
       frameBuffer.dispose();
     };
   }, [reconnectGeneration, enabled, frameBuffer, threadId]);

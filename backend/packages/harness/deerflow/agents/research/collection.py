@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from bs4 import BeautifulSoup
-from pydantic import HttpUrl
 
 from deerflow.agents.research.data import DataRuleError, Source, SourceCapture
 from deerflow.community.jina_ai.jina_client import JinaClient
@@ -23,7 +22,9 @@ def _capture_document(html: str, url: str) -> tuple[str, str]:
     # selecting only an article can discard the configuration and offer itself.
     document = BeautifulSoup(_resolve_html_urls(html, url), "html5lib")
     title = document.title.get_text(" ", strip=True) if document.title else "Untitled"
-    for element in document.select("script, style, noscript, template, [hidden], [aria-hidden='true']"):
+    for element in document.select(
+        "script, style, noscript, template, [hidden], [aria-hidden='true'], .hide, .hidden, body > nav, body > footer, body > [role='navigation'], [role='contentinfo'], .site-header, .site-topbar, .site-footer, .site-info"
+    ):
         element.decompose()
     body = document.body or document
     if not any(character.isalnum() for character in body.get_text()):
@@ -42,8 +43,8 @@ async def _browser_document(url: str, thread_id: str | None) -> tuple[str, str, 
     if session is None:
         return "Untitled", "", "browser_not_open"
     try:
-        page = await asyncio.wait_for(session.capture_page(), 10)
-        if HttpUrl(page["url"]) != HttpUrl(url):
+        page = await asyncio.wait_for(session.capture_page(expected_url=url), 10)
+        if not page["url_matches"]:
             return "Untitled", "", "browser_url_mismatch"
         text = page["text"]
         return str(page["title"]), text, None if text.strip() else "extraction_empty"
@@ -76,7 +77,7 @@ async def collect_sources(*, url: str, product_id: str, configuration_ids: tuple
                 failure = "extraction_failed"
     else:
         raise DataRuleError("invalid_capture_method", "method", "采集方式不合法")
-    title = title[:200]
+    title = title.strip()[:200] or "Untitled"
     collected = datetime.now(UTC)
     raw = text.encode("utf-8")
     truncated = len(raw) > MAX_CAPTURE_TEXT_BYTES

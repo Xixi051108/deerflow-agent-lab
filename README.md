@@ -1528,6 +1528,8 @@ Existing, non-mock Custom Agent chats expose the same Browser Live controls when
 
 For websites that require sign-in, take **Live** control and sign in manually, then click **Remember login** after the website finishes redirecting. DeerFlow saves that user's cookies, local storage and IndexedDB privately on the server and restores them in new chats and after a service restart. Changes are saved every five seconds and on browser snapshots/close; **Forget all logins** clears that user's saved state and closes their browsers. Login screens remain in Live and are excluded from model snapshots, research captures and saved screenshots. The panel supports popup/tab switching, pasted or composed text and pointer dragging; credentials should never be sent in chat. Keep one Gateway process per data directory, with `GATEWAY_WORKERS=1`. Website expiry/revocation can still require manual sign-in; sessionStorage, device-bound credentials and external CDP profiles are not persisted. See [browser login persistence](docs/learning/agent-testing-bootcamp/BROWSER_LOGIN_STATE.md) for activation, verification and limitations.
 
+Research page capture retains purchase sidebars and configuration details instead of selecting only an article. It excludes recognized site navigation and footers, records empty extractions as failures, and checks full product URLs before redacting callback parameters. Rendered captures still require enabled browser tools and an already-open matching page; the bounded render wait can still return incomplete navigation-only content. Source text and displayed prices require review for completeness, configuration, seller and conditions. See [the phase-five acceptance record](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md).
+
 The workspace Browser Live client negotiates binary JPEG WebSocket frames,
 keeps only the newest pending frame per display refresh, and revokes replaced
 object URLs. Gateway control messages remain JSON, and clients that do not
@@ -2023,3 +2025,9 @@ Your unwavering commitment and expertise have been the driving force behind Deer
 - **问题与修复：** 复现仅更新引用绕过、流式请求无总期限、单位诊断不明确等问题。真实DeepSeek还暴露错配置关联、条件／缺口数字错误和未保留原单位的隐式换算，分别补指引、质量断言或确定性校验，并保留失败轮。
 - **验证与边界：** 最后数值保护轮真实模型固定资料3例通过，严格I/O **150 passed／1 skipped**。公开入口取得文本，但商店提取主要是条款，未证明真实SKU当前价。最终离线、Ruff及故障恢复结果见 [测试报告](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_TEST_REPORT.md)；接口、非价格未绑定观察的兼容与语义边界见 [实现说明](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE.md)。未重启服务、提交推送或提前实现预算、报告与面板。
 - **真实电商追加验收：** 相同“小米15各配置京东报价”任务未通过；原搜索相关性不足，固定链接诊断又确认两个京东HTML中有价格但Readability提取遗漏。另有空壳及Reader 403，尚未修复；下一步先完成板块五缺陷修复与实测，详见 [实际验收报告](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)。
+
+### 第五阶段收尾：官网配置标价（2026-10-22）
+
+- **修复：** 浏览器快照在三秒上限内等待正在加载的页面，并标出选中状态；研究采集保存可见的选中标签，避免只列出全部版本而无法区分当前配置。研究指引要求价格、库存等观察都对应实际选中配置；登录遮蔽与完整商品URL校验继续生效。
+- **真实验证：** 已知官网购买链接辅助、未预置价格的真实DeepSeek运行，15次模型／14次工具／54.2秒，完成四配置选择、采集、回读、保存及再次回读。黑色12+256／12+512／16+512／16+1TB分别为3599／3899／4099／4599元，均按页面标价记录；四张截图的金额与配置高亮已核对。
+- **收尾范围：** 本次官网公开标价场景通过，可衔接第六阶段；完整开放搜索发现、任意动态站点稳定性、真实登录和结算未据此验收。最终回归、红绿证据与模型用量见[收尾记录](docs/learning/agent-testing-bootcamp/RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md#11-2026-10-22第五阶段收尾官网四配置实模验证)。

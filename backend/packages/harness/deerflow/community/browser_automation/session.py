@@ -74,7 +74,9 @@ _SNAPSHOT_JS = r"""
     let name = (el.getAttribute("aria-label") || el.getAttribute("name") ||
       el.getAttribute("placeholder") || el.innerText || (type === "password" ? "Password" : "") || "").trim();
     if (name.length > 120) name = name.slice(0, 120) + "…";
-    results.push({ ref, tag, role, type, name });
+    const selected = el.matches("[aria-selected='true'],[aria-checked='true'],:checked") ||
+      !!el.closest("li.active,li.selected,[aria-selected='true']");
+    results.push({ ref, tag, role, type, name, selected });
     if (results.length >= 200) break;
   }
   return { url: location.href, title: document.title, elements: results };
@@ -242,10 +244,13 @@ class SnapshotElement:
     role: str
     type: str
     name: str
+    selected: bool = False
 
     def render(self) -> str:
         label = self.role or self.tag
         detail = f" type={self.type}" if self.type else ""
+        if self.selected:
+            detail += " selected=true"
         name = self.name or "(no text)"
         return f"[{self.ref}] {label}{detail}: {name}"
 
@@ -547,11 +552,17 @@ class BrowserSession:
         return await self._snapshot_impl(page)
 
     async def _snapshot_impl(self, page: Page) -> PageSnapshot:
+        # DOMContentLoaded can precede in-flight SPA options, including in popups.
+        try:
+            await page.wait_for_load_state("networkidle", timeout=_POST_CLICK_LOAD_TIMEOUT_MS)
+        except Exception as exc:
+            if not _is_playwright_timeout_error(exc):
+                raise
         await self._checkpoint_login()
         if await self._needs_login(page):
             return PageSnapshot(url=redact_browser_url(page.url), title="Sign in using Browser Live, then Remember login")
         data = await page.evaluate(_SNAPSHOT_JS)
-        elements = [SnapshotElement(ref=int(e["ref"]), tag=e["tag"], role=e["role"], type=e["type"], name=e["name"]) for e in data["elements"]]
+        elements = [SnapshotElement(ref=int(e["ref"]), tag=e["tag"], role=e["role"], type=e["type"], name=e["name"], selected=e.get("selected", False)) for e in data["elements"]]
         return PageSnapshot(url=redact_browser_url(data["url"]), title=data["title"], elements=elements)
 
     async def _snapshot(self) -> PageSnapshot:
@@ -579,7 +590,12 @@ class BrowserSession:
                 raise
 
         try:
-            await locator.click(timeout=_CLICK_TIMEOUT_MS)
+            if (await locator.get_attribute("target") or "").casefold() == "_blank":
+                async with page.expect_popup(timeout=_POST_CLICK_LOAD_TIMEOUT_MS) as popup:
+                    await locator.click(timeout=_CLICK_TIMEOUT_MS)
+                self._set_active_page(await popup.value)
+            else:
+                await locator.click(timeout=_CLICK_TIMEOUT_MS)
         except Exception as exc:
             if not _is_playwright_timeout_error(exc):
                 raise
@@ -587,6 +603,8 @@ class BrowserSession:
 
         # SPA (client-side) navigations never fire a fresh load event, so this
         # settle wait is best-effort and must never block the snapshot.
+        # A target=_blank click may have changed the active page via its listener.
+        page = await self._ensure_page()
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=_POST_CLICK_LOAD_TIMEOUT_MS)
         except Exception as exc:
@@ -617,15 +635,51 @@ class BrowserSession:
         text = await page.inner_text("body")
         return text[:max_chars]
 
-    async def _capture_page(self, max_chars: int) -> dict:
+    async def _capture_page(self, max_chars: int, expected_url: str | None) -> dict:
         if self._page is None or self._page.is_closed():
             raise RuntimeError("Open the browser page before capturing it")
         if await self._needs_login(self._page):
             raise RuntimeError("Complete login in Browser Live before capturing research")
+        render_started = time.monotonic()
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=3000)
+        except Exception as exc:
+            if not _is_playwright_timeout_error(exc):
+                raise
+        # Deferred SPA work can start after an early network-idle signal.
+        await asyncio.sleep(max(0, 6 - (time.monotonic() - render_started)))
+        # A delayed redirect may have reached login while rendering settled.
+        if await self._needs_login(self._page):
+            raise RuntimeError("Complete login in Browser Live before capturing research")
         capture = await self._page.evaluate(
-            "limit => ({url: location.href, title: document.title, text: (document.body?.innerText || '').slice(0, limit)})",
+            """limit => {
+                const ignored = "script,style,noscript,template,input,textarea,[hidden],[aria-hidden='true'],.hide,.hidden," +
+                    "body > nav,body > footer,body > [role='navigation'],[role='contentinfo'],.site-header,.site-topbar,.site-footer,.site-info";
+                const selected = Array.from(document.querySelectorAll("[aria-selected='true'],[aria-checked='true'],li.active,li.selected"))
+                    .filter(el => !el.closest(ignored) && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+                    .map(el => el.innerText.trim().slice(0, 120)).filter(Boolean).slice(0, 20);
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                let text = selected.length ? 'Selected options (DOM): ' + Array.from(new Set(selected)).join(' | ') + '\\n' : '', lastBlock = null;
+                while (text.length < limit && walker.nextNode()) {
+                    const node = walker.currentNode, parent = node.parentElement;
+                    if (!parent || parent.closest(ignored)) continue;
+                    const range = document.createRange();
+                    range.selectNodeContents(node);
+                    if (!range.getClientRects().length || getComputedStyle(parent).visibility === 'hidden') continue;
+                    const block = parent.closest('p,div,li,dt,dd,td,th,h1,h2,h3,h4,h5,h6,pre,section,article,aside,main') || document.body;
+                    if (block !== lastBlock) text += '\\n';
+                    text += node.textContent;
+                    lastBlock = block;
+                }
+                return {url: location.href, title: document.title, text: text.slice(0, limit)};
+            }""",
             max_chars,
         )
+        # Compare the full URL inside the session before stripping callback data.
+        # Product/SKU query parameters must match, but must not escape in snapshots.
+        from pydantic import HttpUrl
+
+        capture["url_matches"] = expected_url is None or HttpUrl(capture["url"]) == HttpUrl(expected_url)
         capture["url"] = redact_browser_url(capture["url"])
         return capture
 
@@ -973,9 +1027,9 @@ class BrowserSession:
         with self._activity():
             return await self._loop.run(self._get_text(max_chars))
 
-    async def capture_page(self, max_chars: int = 128 * 1024 + 1) -> dict:
+    async def capture_page(self, max_chars: int = 128 * 1024 + 1, *, expected_url: str | None = None) -> dict:
         with self._activity():
-            return await self._loop.run(self._capture_page(max_chars))
+            return await self._loop.run(self._capture_page(max_chars, expected_url))
 
     async def screenshot_bytes(
         self,

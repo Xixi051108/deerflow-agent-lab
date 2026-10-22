@@ -4,6 +4,8 @@
 
 ## 使用与启用
 
+**2026-10-21续作状态：** 后续用户明确授权启动／重启原服务并启用现有浏览器工具组；已启用8项工具并加载最终Gateway代码，认证保持开启。下方“本轮没有修改真实配置／重启”的描述指早期实现轮，当前状态以本文末续作记录为准。其他配置、密钥及真实账号禁用限制继续有效。
+
 1. 部署时按 README 的 Agentic Browser 配置准备 Playwright 与 Chromium，开启原 `browser` 工具组。保持 `GATEWAY_WORKERS=1`，每个 `DEER_FLOW_HOME` 只运行一个 Gateway。需要区分不同人的部署必须启用 DeerFlow 用户认证；禁用认证时所有访问者属于同一本地用户。
 2. 让部署加载本地新代码并刷新前端；本轮没有修改真实配置、安装浏览器、重启现有服务或使用用户真实账号。Windows 缺少 Playwright Chromium 时，可回退到本机 Chrome 的全新隔离实例；不连接个人浏览器目录。
 3. 在已有聊天的 Browser 面板开启 Live，打开官网／必要电商页面。需要登录时由用户手动完成，包括短信、扫码、同意页及弹窗；勿把密码或验证码发送到聊天。标签选择器可切回原页面，点击页面后可输入、粘贴、使用中文输入法或拖动。
@@ -67,3 +69,28 @@
 10月21日首轮发现跨日期测试夹具问题：范围固定10月20日，采集时间却取运行日，正确触发`unverified_price`。首轮定向151 passed／1 failed，严格I/O149 passed／2 failed／1 skipped；冻结frozen_reader夹具的采集时钟后原边界30 passed。最终定向179 passed（58.70秒），完整严格I/O151 passed／1 skipped（48.60秒）；前端浏览器18 passed，完整ESLint／TypeScript退出0。此次未重跑默认离线全集，前文全集数字仍是10月20日历史结果。
 
 日志均为`push-20261021-*`，没有覆盖首轮失败。未使用真实账号、模型或重启现有服务；没有再复制整棵源码做隔离验证。本次提交包含现有官网正文／浏览器采集改动，但真实网页与小米15报价场景仍待联调验收，不能把合成测试通过当作业务闭环完成。
+
+## 2026-10-21 合成站点面板联调续作
+
+| 用例 | 预期 | 实际结果 |
+| --- | --- | --- |
+| Live输入及Remember | 原面板经真实HTTP／WS路由驱动隔离Chrome，保存合成状态 | 合成用户名／密码经截图坐标与面板键盘通道输入，保存接口200；未使用真实账号 |
+| 第二聊天恢复 | 同用户新会话恢复Cookie、localStorage、IndexedDB | 三者同时恢复，等待非空画面后截图；人工看到合成商店和恢复提示 |
+| Forget与重开 | 两个会话均关闭，重开需登录 | 两线程均closed，重新Live显示人工登录提示 |
+| 完整Next聊天页（早轮） | 页面壳／代理链一起通过 | 当时未通过：能力夹具修正后仍失败，第二实例也遇项目锁；后续成功见下节。独立面板结果不替代完整页面结果 |
+
+最终**1 passed（13.9秒）**，日志`phase5-panel-frame-verified/`。入口为`frontend/tests/support/build-browser-login-panel.mjs`、`backend/tests/support/browser_login_gateway.py`和`frontend/tests/e2e/browser-login.spec.ts`（显式`BROWSER_LOGIN_SYNTHETIC=1`）。前两者只用于独立测试进程，不挂入生产Gateway；使用临时用户状态目录和合成网站，原网络防护继续绑定。面板图像曾未到达就截图，新增画面到达断言后重测通过，旧失败保留。临时8105测试进程已停止；其Ctrl+Break退出码3与测试退出0分别记录。
+
+按用户后续授权，真实配置仅启用原8项browser工具，隔离Chrome、私网／metadata拒绝、无CDP、单Gateway约束保留。最终重启Gateway后健康／就绪200，匿名功能接口401；前端3000仍运行。`.env`及extensions配置指纹未变，没有真实账号登录验收。需要登录时交还用户在已有Live面板操作；仍不将合成通过写成真实电商通过。
+
+最终六秒版本后端组合195 passed、严格I/O151 passed／1 skipped；前端浏览器18 passed，完整静态检查最终退出0。完整数字、失败历史、真实模型39次的用量及官网动态正文未稳定问题见[续作验收记录](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)第8节。默认全集没有覆盖最后等待小修，不与专项叠加计数。
+
+## 2026-10-21 完整Next页面补验（最新）
+
+原Hook在StrictMode探测挂载创建多余WebSocket，旧viewer与新viewer启动竞态；新增回归先复现2个socket，再将创建延后一个微任务，使已清理挂载不打开连接。保留排队导航、撤销及重连行为，Hook三项和完整browser-view **19项**通过；完整ESLint／TypeScript最终退出0。
+
+原`frontend/scripts/dev.mjs`及Next rewrites、合成Gateway／身份／线程、隔离Chrome和临时状态目录的完整页面E2E **1 passed（19.2秒）**，产物`phase5-next-panel-11/`。面板输入登录、Remember、第二聊天恢复Cookie／localStorage／IndexedDB、Forget关闭两会话、重新Live要求登录均通过，恢复截图已人工核对。覆盖完整页面和代理链，但测试Next使用进程级合成auth-disabled，**不验证生产JWT／CSRF或真实电商账号**。
+
+失败轮1–10、Next项目锁、upgrade注册、控件边缘坐标与静态检查错误均保留；不能仅凭删去自定义upgrade注册断言根因解决。测试期间按已有授权暂停原前端，完成后恢复3000；Gateway最终重启加载popup修复，健康／就绪200，匿名auth/me 401，3105／8105无监听。生产认证和网络防护保留，无真实账号测试。
+
+最新后端相关组合197 passed、严格I/O151 passed／1 skipped。明细及模型失败见[验收第10节](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)。忽略启动器`phase5_next_panel.py`不会自动恢复前端，直接重跑前必须安排恢复，创建PID不等于服务就绪。

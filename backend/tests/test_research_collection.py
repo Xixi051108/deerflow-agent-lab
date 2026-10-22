@@ -127,7 +127,7 @@ async def test_capture_keeps_official_purchase_details_outside_article(monkeypat
     from deerflow.agents.research.collection import collect_sources
 
     html = (
-        "<html><head><title>极光 A1 官方商城</title></head><body><article>" + "<p>用户体验分享：这台手机使用流畅，拍摄体验很好，屏幕清晰。</p>" * 40 + "</article><aside><h1>极光 A1</h1><div>12GB+256GB 黑色</div>"
+        "<html><head><title>极光 A1 官方商城</title></head><body><article>" + "<p>用户体验分享：这台手机使用流畅，拍摄体验很好，屏幕清晰。</p>" * 40 + "</article><aside><h1>极光 A1</h1><nav>12GB+256GB 黑色</nav>"
         "<div>商品标价 3099.00 元</div><p>登录查看到手价，优惠资格待核对。</p>"
         "<a href='/specs'>官方参数</a></aside></body></html>"
     )
@@ -142,6 +142,48 @@ async def test_capture_keeps_official_purchase_details_outside_article(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_browser_capture_preserves_selected_options_instead_of_only_listing_variants(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from test_browser_login_state import _InlineLoop
+
+    from deerflow.agents.research.collection import collect_sources
+    from deerflow.community.browser_automation.session import BrowserSession
+
+    monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
+    monkeypatch.setattr("deerflow.config.paths._paths", None)
+    session = BrowserSession(_InlineLoop(), user_id="synthetic-user", headless=True, timeout_ms=5000, viewport={"width": 800, "height": 600})
+    monkeypatch.setattr("deerflow.community.browser_automation.get_browser_session_manager", lambda: SimpleNamespace(existing_session=lambda thread: session))
+    monkeypatch.setattr("deerflow.agents.research.collection.get_app_config", lambda: SimpleNamespace(get_tool_config=lambda name: SimpleNamespace(model_extra={})))
+    html = """<title>Synthetic store</title><main><ul>
+      <li class="active"><button onclick="choose(this)">12GB+256GB</button></li>
+      <li><button onclick="choose(this)">12GB+512GB</button></li></ul>
+      <button aria-selected="true">黑色</button><button aria-selected="false">白色</button>
+      <button aria-selected="true" hidden>Hidden variant</button><input value="synthetic-secret">
+      <p>商品标价 <span id="price">3299</span> 元</p></main>
+      <script>function choose(button) {
+        document.querySelector('li.active').classList.remove('active');
+        button.parentElement.classList.add('active');
+        document.querySelector('#price').textContent = '3599';
+      }</script>"""
+    try:
+        page = await session._ensure_page()
+        await page.route("https://example.com/**", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html))
+        before = await session.navigate("https://example.com/buy")
+        assert "selected=true: 12GB+256GB" in before.render()
+        after = await session.click(next(element.ref for element in before.elements if element.name == "12GB+512GB"))
+        assert "selected=true: 12GB+512GB" in after.render()
+        assert "selected=true: 12GB+256GB" not in after.render()
+        sources = await collect_sources(url="https://example.com/buy", product_id="p", configuration_ids=("c2",), method="browser", thread_id="t")
+        text = "".join(source.text or "" for source in sources)
+        assert "Selected options (DOM): 12GB+512GB | 黑色" in text
+        assert "商品标价 3599 元" in text
+        assert "Hidden variant" not in text and "synthetic-secret" not in text
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
 async def test_browser_capture_reads_the_existing_page_without_navigating(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
@@ -149,7 +191,7 @@ async def test_browser_capture_reads_the_existing_page_without_navigating(monkey
     from deerflow.agents.research.collection import collect_sources
 
     session = MagicMock()
-    session.capture_page = AsyncMock(return_value={"url": "https://example.com/buy", "title": "官方商城", "text": "极光 A1 12GB+256GB 商品标价3099.00元，登录查看到手价。"})
+    session.capture_page = AsyncMock(return_value={"url": "https://example.com/buy", "url_matches": True, "title": "官方商城", "text": "极光 A1 12GB+256GB 商品标价3099.00元，登录查看到手价。"})
     manager = MagicMock()
     manager.existing_session.return_value = session
     monkeypatch.setattr("deerflow.community.browser_automation.get_browser_session_manager", lambda: manager)
@@ -159,3 +201,59 @@ async def test_browser_capture_reads_the_existing_page_without_navigating(monkey
     assert sources[0].capture.method == "browser_dom"
     manager.existing_session.assert_called_once_with("t")
     session.navigate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reader_does_not_treat_only_site_navigation_and_footer_as_evidence(monkeypatch):
+    from deerflow.agents.research.collection import collect_sources
+
+    html = (
+        "<html><title>合成商城</title><body><div id='app'><div class='site-topbar'>商城 登录 购物车</div><main></main>"
+        "<div class='site-footer'>售后服务 7天无理由退货 400电话 购买指南</div><div class='site-info'>备案信息</div></div></body></html>"
+    )
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=html)), **kwargs))
+    sources = await collect_sources(url="https://example.com/buy?product_id=synthetic", product_id="p", product_wide=True, kind="official")
+    assert len(sources) == 1
+    assert sources[0].status == "failed"
+    assert sources[0].failure_reason == "extraction_empty"
+    assert sources[0].text is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delayed", [False, True])
+async def test_browser_capture_matches_product_query_without_exposing_redirect_query(tmp_path, monkeypatch, delayed):
+    import json
+    from types import SimpleNamespace
+
+    from test_browser_login_state import _InlineLoop
+
+    from deerflow.agents.research.collection import collect_sources
+    from deerflow.community.browser_automation.session import BrowserSession
+
+    monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
+    monkeypatch.setattr("deerflow.config.paths._paths", None)
+    session = BrowserSession(_InlineLoop(), user_id="synthetic-user", headless=True, timeout_ms=5000, viewport={"width": 800, "height": 600})
+    monkeypatch.setattr("deerflow.community.browser_automation.get_browser_session_manager", lambda: SimpleNamespace(existing_session=lambda thread: session))
+    monkeypatch.setattr("deerflow.agents.research.collection.get_app_config", lambda: SimpleNamespace(get_tool_config=lambda name: SimpleNamespace(model_extra={})))
+    try:
+        page = await session._ensure_page()
+        offer = "<main><nav>极光 A1 12GB+256GB</nav><p>商品标价<span>32</span><span>99</span>元</p></main><footer>售后服务 7天退货</footer><div style='display:none'>旧配置9999元</div>"
+        body = "<body>Loading<script>setTimeout(() => {document.body.innerHTML = " + json.dumps(offer) + ";}, 1500)</script></body>" if delayed else offer
+        await page.route(
+            "https://example.com/**",
+            lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=body),
+        )
+        url = "https://example.com/buy?product_id=first"
+        await session.navigate(url)
+        sources = await collect_sources(url=url, product_id="p", configuration_ids=("c1",), method="browser", thread_id="t")
+        assert sources[0].failure_reason is None
+        assert "3299" in sources[0].text
+        assert "极光 A1 12GB+256GB" in sources[0].text
+        assert "售后服务" not in sources[0].text and "9999" not in sources[0].text
+        wrong = await collect_sources(url="https://example.com/buy?product_id=second", product_id="p", configuration_ids=("c2",), method="browser", thread_id="t")
+        assert wrong[0].failure_reason == "browser_url_mismatch" and wrong[0].text is None
+        await session.navigate("https://example.com/buy?code=synthetic-callback")
+        assert "synthetic-callback" not in str(await session.capture_page())
+    finally:
+        await session.close()

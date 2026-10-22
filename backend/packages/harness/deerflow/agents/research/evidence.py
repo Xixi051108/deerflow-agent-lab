@@ -156,6 +156,13 @@ Evidence collection after the provisional candidate/dimension plan (research mod
   one capture/URL are NOT independent sources. Do not reconstruct, edit or mint capture metadata.
   Legacy/model-submitted text remains unbound observation, never evidence of an actual page read.
 - Extract claims and exact citations only from inspected text for the correct model/configuration.
+  On configurable sales pages, click the target option and inspect the fresh snapshot's
+  selected=true state before capture. Captured "Selected options (DOM)" records visible DOM
+  selection hints, not verified SKU identity. Listing every option does not mean all are selected.
+  Bind EVERY observation (including stock, seller and qualitative facts) to the actually selected
+  configuration; if selection is missing or mismatched, refresh/select again or leave a Gap.
+  If a fresh popup snapshot lacks purchase options, refresh the snapshot after loading; never
+  reuse source-tab refs or assume that the default variant matches the requested one.
   Read the saved products/configurations/dimensions first. Each dimension represents ONE attribute:
   do not put configuration, battery capacity, seller text or all observations into an imaging/weight
   dimension. Add a separate relevant dimension (description, basis, unit) when needed. Claim.unit

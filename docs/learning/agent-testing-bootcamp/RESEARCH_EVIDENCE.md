@@ -1,15 +1,21 @@
 # 板块五：证据采集与价格观察
 
+**2026-10-22收尾：** 官网公开标价范围通过一轮真实DeepSeek四配置验证（已知购买链接辅助，未预置金额）：15模型／14工具／54.2秒，四条list价格与配置、引用、真实采集时间正确保存并回读。快照新增三秒有界network-idle等待及选中提示，采集正文保存可见选中标签；所有观察都须核对所选配置。详见[验收第11节](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md#11-2026-10-22第五阶段收尾官网四配置实模验证)。后续进入板块6规划；开放搜索发现、任意站点稳定性及真实结算仍未验收。以下10月21日失败为历史，不能被本轮小样本覆盖。
+
+最新续作：完整Next合成登录态联调已通过；原Hook延后一微任务创建WebSocket，避免StrictMode丢弃挂载的viewer竞态。BrowserSession对显式target=_blank点击等待有界popup事件，再采用新活动页生成快照；登录遮蔽、URL脱敏及网络防护沿用。任意延迟JavaScript弹窗仍需刷新快照。后端197项、严格I/O151项、前端19项及完整页面E2E1项验证见[验收第10节](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)。四配置官网标价已有证据，按用户最新口径地区缺货不阻塞本次报价；完整模型配置语义链仍未通过。以下动态正文失败等记录保留为历史边界。
+
 实现与验证记录见 [测试报告](RESEARCH_EVIDENCE_TEST_REPORT.md)，设计依据见 [实施任务书](RESEARCH_EVIDENCE_PLAN.md)。沿用原研究 Agent、确认卡、权限处理器和快照，没有另建应用、数据库或研究循环。
 
-最新实际限制：同日 [小米15真实电商验收](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md) 未通过。两个京东响应HTML包含目标商品价格，但当前Readability文章提取选择评论区域并丢失价格；另有搜索相关性、空壳内容及Reader 403问题。核心代码和受控测试已有，真实商品采集尚待修复与复测。
+10月20日历史限制：[小米15真实电商验收](RESEARCH_EVIDENCE_WEB_ACCEPTANCE.md)未通过，当时文章提取选择评论区域并丢失价格，另有搜索相关性、空壳及Reader 403问题。10月21日续作已保留购买侧栏／商品内部配置，过滤明确站点chrome并修复完整URL比较；两条京东配置标价有实际采集观察。浏览器采用六秒有界渲染窗口，仍在原十秒期限内，但最终官网模型轮仍只有导航，稳定采集未解决。四配置、卖家及优惠未全部核实，完整Next登录链未验收；以验收记录第8节为准，不把合成通过写成业务通过。
+
+随后第9节的公开页诊断从产品页实际购买链接找到20618，逐配置切换并在两轮中采到四项官网标价；四配置资料缺口已补齐，默认地区仍缺货、成交条件未知。此次没有新增模型调用或写入真实用户研究，不代表完整模型自主发现／采集／Claim保存通过，也不覆盖早轮动态正文失败。
 
 ## 使用顺序
 
 1. 用 `research_enabled: true` 的原研究 Agent 确认范围，保存候选、明确配置和比较维度。
 2. `web_search` 寻找线索。只有用户消息或成功的 `web_search`／`web_fetch` 返回过的完整 URL，才能提交采集；模型自填 Source URL 不构成准入依据。
 3. 单独调用 `collect_research_source`，传入产品、配置或产品级适用范围，以及当前研究 ID、范围版本和数据 revision。
-4. 按返回的 source_ids 使用 `read_research_data(section="sources")` 分页读取实际提取文本，遵循 next_offset。用新 revision 提交事实、精确引用、缺口与冲突。
+4. 按返回的 source_ids 使用 `read_research_data(section="sources")` 分页读取实际提取文本，遵循 next_offset。配置页须核对快照的 `selected=true` 与正文的 `Selected options (DOM)`；它们只是ARIA／active／selected等可见DOM提示，不能当通用SKU识别或认证。仅列出全部可选版本不证明目标版本已选中。用新 revision 提交事实、精确引用、缺口与冲突。
 5. 回读 claims 的 evidence_assessment，并逐字段核对原文、配置、条件和金额。说明已保存内容与未知，不提前输出完整研究推荐或报告文件。
 
 新普通文字仍使确认失效；同范围重新确认保留数据，范围改变、新研究、历史恢复和分支沿用原清空规则。工具授权拒绝时不改走隐藏请求通道。
@@ -18,7 +24,7 @@
 
 `collect_research_source` 参数：url、product_id、configuration_ids／product_wide、kind、expected_research_id、expected_scope_version、expected_revision。配置必须属于产品，产品须先保存。kind 和配置适用范围由模型声明，程序不因此认定网站是官方或页面确实匹配该配置。
 
-该工具与普通数据写入互斥，同批多次采集、采集加读取／其他写入、含不完整写入都不执行。它通过原 handler 接受工具权限与 guardrail 检查，然后使用既有 Jina Reader、Readability 和 Markdown 提取器；异步配置、提取和文件存储走 run_file_io。
+该工具与普通数据写入互斥，同批多次采集、采集加读取／其他写入、含不完整写入都不执行。它通过原 handler 接受工具权限与 guardrail 检查。Reader 使用 BeautifulSoup 保留正文和购买侧栏后转 Markdown，移除明确的隐藏元素、站点导航／页脚；空壳保存为 extraction_empty。渲染采集使用已有浏览器的可见文本，排除输入值和站点页脚，保留正文内配置导航及跨 span 的金额。异步配置、提取和文件存储走 run_file_io。浏览器在会话内部比对完整 URL（包括商品查询参数），再对外移除 query／fragment；缺标题回退 Untitled。提取不保证识别任意 CSS、网站框架或价格语义，评论／推荐仍需人工区分。
 
 | 边界 | 实际行为 |
 | --- | --- |

@@ -44,6 +44,8 @@ Rstest runs them as two projects (`rstest.config.ts`). `*.test.ts` / `*.test.tsx
 
 E2E tests live under `tests/e2e/` and use Playwright with Chromium. They mock all backend APIs via `page.route()` network interception and test real page interactions (navigation, chat input, streaming responses). Config: `playwright.config.ts`. The real-backend auth contract in `tests/e2e-real-backend/auth-disabled-contract.spec.ts` and `backend/tests/test_auth_me_permissions.py` pin the complete route-permission list; update both when adding registered permissions (including `projects:read/write/delete`).
 
+Browser Live defers WebSocket creation until a microtask so discarded StrictMode mounts cannot open stale viewers. Preserve queued navigation and revocation behavior; regressions live in `use-browser-stream.dom.test.tsx`. The opt-in synthetic login E2E also runs through Next rewrites with the original dev script; its test identity does not validate production JWT/CSRF. See the root learning acceptance record for separate panel and full-page results.
+
 The dedicated `run-history.ts` hook replaces the unpaged runs hook. Show counts
 only after a successful history read, never during initial loading or errors.
 Scheduled run history uses task/page query keys and the existing live offset API.
